@@ -18,7 +18,11 @@ void wails_mouse_grab_start(void *windowPtr) {
             NSEventMaskRightMouseDragged | NSEventMaskOtherMouseDragged;
         wailsMouseGrabMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:mask
             handler:^NSEvent *(NSEvent *event) {
-                if (wailsMouseGrabWindow == nil || event.window == wailsMouseGrabWindow) {
+                // Once the cursor is disassociated, AppKit commonly delivers
+                // relative mouse events without attaching an NSWindow. They
+                // still belong to this app's local event stream and must not
+                // be filtered out.
+                if (event.window == nil || wailsMouseGrabWindow == nil || event.window == wailsMouseGrabWindow) {
                     wailsMouseGrabDelta(event.deltaX, event.deltaY);
                 }
                 return event;
