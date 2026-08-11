@@ -306,6 +306,60 @@ func (m *mcpServer) registerTools() {
 			},
 		},
 		{
+			Name: "mouse_move_native",
+			Description: "Send application-local native mouse-moved events with relative deltas to the focused " +
+				"window. Use this to test native mouse grabs and game input; unlike mouse_move, the events pass " +
+				"through the operating-system window dispatcher without controlling other applications.",
+			Schema: mcpObjectSchema([]string{"delta_x", "delta_y"}, map[string]any{
+				"delta_x":     mcpProp("number", "Horizontal movement per event in native pixels."),
+				"delta_y":     mcpProp("number", "Vertical movement per event in native pixels."),
+				"steps":       mcpProp("number", "Number of movement events to send. Defaults to 1; maximum 100."),
+				"interval_ms": mcpProp("number", "Delay between events in milliseconds. Defaults to 0; maximum 1000."),
+				"window":      mcpWindowProp(),
+			}),
+			Handler: func(args map[string]any) (any, error) {
+				deltaX, hasX := mcpArgFloat(args, "delta_x")
+				deltaY, hasY := mcpArgFloat(args, "delta_y")
+				if !hasX || !hasY {
+					return nil, errors.New("mouse_move_native requires delta_x and delta_y")
+				}
+				if deltaX == 0 && deltaY == 0 {
+					return nil, errors.New("mouse_move_native requires a non-zero delta")
+				}
+				name, _ := mcpArgString(args, "window")
+				window, err := m.resolveWindow(name)
+				if err != nil {
+					return nil, err
+				}
+				if !window.IsFocused() {
+					return nil, fmt.Errorf("window %q must be focused before sending native mouse movement", window.Name())
+				}
+				steps := mcpArgInt(args, "steps", 1)
+				if steps < 1 || steps > 100 {
+					return nil, errors.New("mouse_move_native steps must be between 1 and 100")
+				}
+				intervalMS := mcpArgInt(args, "interval_ms", 0)
+				if intervalMS < 0 || intervalMS > 1000 {
+					return nil, errors.New("mouse_move_native interval_ms must be between 0 and 1000")
+				}
+				for step := 0; step < steps; step++ {
+					if err := mcpSendNativeMouseMove(window, deltaX, deltaY); err != nil {
+						return nil, err
+					}
+					if intervalMS > 0 && step+1 < steps {
+						time.Sleep(time.Duration(intervalMS) * time.Millisecond)
+					}
+				}
+				return map[string]any{
+					"window":   window.Name(),
+					"deltaX":   deltaX,
+					"deltaY":   deltaY,
+					"steps":    steps,
+					"delivery": "native-window",
+				}, nil
+			},
+		},
+		{
 			Name: "mouse_click",
 			Description: "Click a point or element with the animated mouse cursor: the cursor visibly moves " +
 				"there, presses with a ripple effect and dispatches the full pointer/mouse event sequence. " +

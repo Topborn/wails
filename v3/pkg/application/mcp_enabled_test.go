@@ -79,7 +79,7 @@ func TestMCPToolsList(t *testing.T) {
 	if !ok || len(tools) == 0 {
 		t.Fatalf("expected non-empty tools list, got %v", result)
 	}
-	// Verify the registry exposes exactly the expected 16 tools.
+	// Verify the registry exposes exactly the expected tools.
 	names := make(map[string]bool)
 	for _, tool := range tools {
 		toolMap, _ := tool.(map[string]any)
@@ -93,7 +93,7 @@ func TestMCPToolsList(t *testing.T) {
 	expected := []string{
 		"app_info", "windows_list", "window_control", "js_eval",
 		"dom_html", "dom_query",
-		"mouse_move", "mouse_click", "mouse_drag", "mouse_scroll",
+		"mouse_move", "mouse_move_native", "mouse_click", "mouse_drag", "mouse_scroll",
 		"keyboard_type", "keyboard_press",
 		"call_bound_method", "emit_event", "wait_for_event", "screenshot_dom",
 	}
