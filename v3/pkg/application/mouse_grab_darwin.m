@@ -58,3 +58,38 @@ void wails_mouse_grab_stop(void) {
         wailsMouseGrabbed = NO;
     });
 }
+
+// Sends a mouse-moved event through NSApplication itself. This exercises local
+// event monitors and the target window's native input path without posting a
+// system-wide event or requiring Accessibility/Input Monitoring permission.
+int wails_mcp_mouse_move_native(void *windowPtr, double deltaX, double deltaY) {
+    __block int delivered = 0;
+    void (^sendEvent)(void) = ^{
+        NSWindow *window = (__bridge NSWindow *)windowPtr;
+        if (window == nil || !window.isKeyWindow) return;
+
+        CGEventRef locationEvent = CGEventCreate(NULL);
+        CGPoint location = locationEvent == NULL ? CGPointZero : CGEventGetLocation(locationEvent);
+        if (locationEvent != NULL) CFRelease(locationEvent);
+
+        CGEventRef mouseEvent = CGEventCreateMouseEvent(
+            NULL, kCGEventMouseMoved, location, kCGMouseButtonLeft);
+        if (mouseEvent == NULL) return;
+        CGEventSetIntegerValueField(mouseEvent, kCGMouseEventDeltaX, (int64_t)deltaX);
+        CGEventSetIntegerValueField(mouseEvent, kCGMouseEventDeltaY, (int64_t)deltaY);
+
+        NSEvent *event = [NSEvent eventWithCGEvent:mouseEvent];
+        if (event != nil) {
+            [NSApp sendEvent:event];
+            delivered = 1;
+        }
+        CFRelease(mouseEvent);
+    };
+
+    if ([NSThread isMainThread]) {
+        sendEvent();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), sendEvent);
+    }
+    return delivered;
+}
