@@ -21,6 +21,7 @@ type Window interface {
 	GetBorderSizes() *LRTB
 	GetScreen() (*Screen, error)
 	GetZoom() float64
+	GrabMouse(callback func(MouseDelta)) error
 	handleDragAndDropMessage(filenames []string, dropTarget *DropTargetDetails)
 	InitiateFrontendDropProcessing(filenames []string, x int, y int)
 	HandleMessage(message string)
@@ -44,6 +45,7 @@ type Window interface {
 	Position() (int, int)
 	RelativePosition() (int, int)
 	Reload()
+	ReleaseMouse()
 	Resizable() bool
 	Restore()
 	Run()
