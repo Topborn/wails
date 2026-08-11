@@ -20,8 +20,10 @@ var mouseGrabState = struct {
 	callback func(MouseDelta)
 }{}
 
-// GrabMouse hides and decouples the cursor, forwarding unbounded relative
-// movement until ReleaseMouse is called. Only one window may own the mouse.
+// GrabMouse hides and decouples the cursor, forwarding relative movement from
+// this window while it is focused until ReleaseMouse is called. It uses an
+// application-local event monitor, so it does not require Input Monitoring or
+// Accessibility permission. Only one window may own the mouse.
 func (w *WebviewWindow) GrabMouse(callback func(MouseDelta)) error {
 	if callback == nil {
 		return errors.New("mouse grab callback is required")
