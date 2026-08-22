@@ -36,6 +36,8 @@ window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 
         // Host-to-guest evaluation is off unless explicitly enabled.
         AllowJavaScriptEvaluation: false,
+        // openDevTools() needs this and a build without the production tag
+        // (or with the devtools tag); the guest is then marked inspectable.
         DevToolsEnabled:           false,
 
         // Unspecified guest permissions are denied.
@@ -129,23 +131,29 @@ The `render-process-gone` detail contains `reason` and `exitCode`. Wails does no
 The native guest is composited above the host document, which would normally
 hide any DOM that overlaps it. Instead the runtime makes CSS stacking hold: a
 dropdown, modal, toast or floating panel that paints above the
-`<wails-webview>` element by the usual rules — `position` plus `z-index`, or
-`position: fixed` — shows through the guest and receives pointer input there.
-Give the element itself a `z-index` to put it above such content.
+`<wails-webview>` element by the normal rules shows through the guest and
+receives pointer input there. Give the element itself a `z-index` (and a
+`position`) to put it above such content; nothing needs to be marked.
 
-How it works: the runtime keeps a set of positioned elements that take part in
-z-ordering (maintained from the same mutation observer that tracks guest
-geometry, so a layout pass never walks the whole document). For each one that
-overlaps a guest it asks the engine, via `elementsFromPoint`, whether that
-element really stacks above the guest element, then sends the covered boxes to
-the native view, which masks them out and declines hit-testing inside them.
-Scroll, resize, attribute changes and transition/animation ends all trigger a
-recheck.
+How it works: the runtime keeps a set of positioned elements and stacking
+contexts, maintained from the same mutation observer that tracks guest
+geometry, so a layout pass never walks the whole document. For each one whose
+box overlaps a guest it applies the CSS painting-order algorithm — it finds the
+stacking context the two share, then orders them within it by layer (negative
+`z-index`, in-flow content, positioned with `z-index: auto`/`0`, positive
+`z-index`), by `z-index`, and finally by DOM order; a non-positioned element
+paints with its nearest positioned ancestor. Stacking contexts are recognised
+from `position` + `z-index`, `fixed`/`sticky`, `opacity`, `transform`,
+`filter`, `backdrop-filter`, `mix-blend-mode`, `isolation`, `will-change`,
+`contain`, `clip-path` and `mask-image`, and `z-index` on flex/grid items. No
+hit-testing is involved, so `pointer-events: none` content is handled too.
+Covered boxes are merged and sent to the native view, which masks them out and
+declines hit-testing inside them. Scroll, resize, attribute changes and
+transition/animation ends all trigger a recheck.
 
-Limits: only the element's own boxes are cut out, not its shadow or blur, so
-keep such effects inside the border box. An element the engine cannot hit-test
-(`pointer-events: none`) is never detected; mark it `data-wails-overlay` to
-force the cut-out. Nothing inside a guest can be cut out of that guest.
+Limits: only an element's own boxes are cut out, not its shadow, outline or
+blur, so keep such effects inside the border box. Nothing inside a guest can be
+cut out of that guest.
 
 Supported on macOS. On Linux and Windows the call is accepted and ignored, so
 host content stays hidden behind the guest there.
@@ -157,8 +165,8 @@ A guest never shows the engine's own context menu. A right-click emits a
 `EmbeddedWebViewContextMenuDetail`: `x`/`y` in guest-local CSS px, `linkURL`,
 `srcURL` and `mediaType` (`img`, `video`, `audio` or empty) of the element under
 the pointer, the current `selectionText`, `isEditable` and the element's
-`tagName`. Decide in the host what to show — your own DOM menu (marked
-`data-wails-overlay` so it can sit over the guest), a native menu, or nothing:
+`tagName`. Decide in the host what to show — your own DOM menu (it stacks over the guest
+like any other content), a native menu, or nothing:
 
 ```ts
 guest.addEventListener("context-menu", (event) => {

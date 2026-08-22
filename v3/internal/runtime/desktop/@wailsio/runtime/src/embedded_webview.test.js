@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { WailsWebViewElement, scanStacking } from "./embedded_webview";
+import { WailsWebViewElement, paintsAbove, scanStacking } from "./embedded_webview";
 import { embeddedWebViewMethods as methods, objectNames } from "./protocol.generated";
 import { setTransport } from "./runtime";
 
@@ -51,41 +51,91 @@ describe("wails-webview", () => {
         panel.getClientRects = () => [{ left: 0, top: 100, right: 100, bottom: 300 }];
         document.body.append(panel);
         scanStacking(panel);
-        // The engine decides stacking: the panel is hit before the guest.
-        document.elementsFromPoint = vi.fn(() => [panel, element, document.body]);
         await element.syncLayout(0);
 
-        expect(document.elementsFromPoint).toHaveBeenCalledWith(56, 152);
         expect(call).toHaveBeenCalledWith(objectNames.EmbeddedWebView, methods.SetExclusions, "", {
             id: 42,
             rects: [[0, 76, 88, 104]],
         });
 
-        // Unchanged stacking is not resent; a guest that wins z-order clears the cut-out.
+        // Unchanged stacking is not resent; a guest with a higher z-index wins.
         call.mockClear();
         await element.syncLayout(0);
         expect(call).not.toHaveBeenCalledWith(objectNames.EmbeddedWebView, methods.SetExclusions, "", expect.anything());
-        document.elementsFromPoint = vi.fn(() => [element, panel, document.body]);
+        element.style.position = "relative";
+        element.style.zIndex = "100";
         await element.syncLayout(0);
         expect(call).toHaveBeenCalledWith(objectNames.EmbeddedWebView, methods.SetExclusions, "", { id: 42, rects: [] });
         panel.remove();
-        delete document.elementsFromPoint;
     });
 
-    it("forces a cut-out for elements marked data-wails-overlay", async () => {
+    it("merges overlapping overlays into disjoint cut-outs", async () => {
         await element.getURL();
         call.mockClear();
-        const toast = document.createElement("div");
-        toast.setAttribute("data-wails-overlay", "");
-        toast.getClientRects = () => [{ left: 20, top: 30, right: 60, bottom: 50 }];
-        document.body.append(toast);
-        scanStacking(toast);
+        const aside = document.createElement("aside");
+        aside.style.position = "fixed";
+        aside.style.zIndex = "55";
+        aside.getClientRects = () => [{ left: 200, top: 0, right: 400, bottom: 400 }];
+        const pill = document.createElement("button");
+        pill.style.position = "fixed";
+        pill.style.zIndex = "60";
+        pill.getClientRects = () => [{ left: 300, top: 150, right: 340, bottom: 170 }];
+        document.body.append(aside, pill);
+        scanStacking(aside);
+        scanStacking(pill);
         await element.syncLayout(0);
+        // The pill lies inside the aside's box, so the aside's rect alone covers it.
         expect(call).toHaveBeenCalledWith(objectNames.EmbeddedWebView, methods.SetExclusions, "", {
             id: 42,
-            rects: [[8, 6, 40, 20]],
+            rects: [[188, 0, 132, 180]],
         });
-        toast.remove();
+        aside.remove();
+        pill.remove();
+    });
+
+    describe("paintsAbove follows CSS stacking order", () => {
+        const make = (style, parent = document.body) => {
+            const el = document.createElement("div");
+            Object.assign(el.style, style);
+            parent.append(el);
+            return el;
+        };
+        it("positioned z-index beats a static guest; negative z-index does not", () => {
+            const high = make({ position: "absolute", zIndex: "1" });
+            const low = make({ position: "absolute", zIndex: "-1" });
+            expect(paintsAbove(high, element)).toBe(true);
+            expect(paintsAbove(low, element)).toBe(false);
+            high.remove();
+            low.remove();
+        });
+        it("compares at the shared stacking context, not by raw z-index", () => {
+            // A z-index:9999 item inside a z-index:1 context loses to a z-index:2 guest.
+            const context = make({ position: "relative", zIndex: "1" });
+            const inner = make({ position: "absolute", zIndex: "9999" }, context);
+            element.style.position = "relative";
+            element.style.zIndex = "2";
+            expect(paintsAbove(inner, element)).toBe(false);
+            element.style.zIndex = "0";
+            expect(paintsAbove(inner, element)).toBe(true);
+            context.remove();
+        });
+        it("uses DOM order for positioned z-index:auto siblings", () => {
+            const before = document.createElement("div");
+            before.style.position = "relative";
+            element.before(before);
+            const after = make({ position: "relative" });
+            expect(paintsAbove(before, element)).toBe(false);
+            expect(paintsAbove(after, element)).toBe(true);
+            before.remove();
+            after.remove();
+        });
+        it("lets a static child paint with its positioned ancestor", () => {
+            const dropdown = make({ position: "absolute", zIndex: "40" });
+            const item = make({}, dropdown);
+            item.style.pointerEvents = "none";
+            expect(paintsAbove(item, element)).toBe(true);
+            dropdown.remove();
+        });
     });
 
     it("creates an isolated backend view from its DOM bounds", async () => {
