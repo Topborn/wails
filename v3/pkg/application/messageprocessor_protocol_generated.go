@@ -42,6 +42,7 @@ const (
 	embeddedWebViewSetBounds
 	embeddedWebViewSetVisible
 	embeddedWebViewSetZIndex
+	embeddedWebViewSetExclusions
 	embeddedWebViewLoadURL
 	embeddedWebViewGetURL
 	embeddedWebViewGetTitle
@@ -67,6 +68,7 @@ var embeddedWebViewMethodNames = map[int]string{
 	embeddedWebViewSetBounds:           "SetBounds",
 	embeddedWebViewSetVisible:          "SetVisible",
 	embeddedWebViewSetZIndex:           "SetZIndex",
+	embeddedWebViewSetExclusions:       "SetExclusions",
 	embeddedWebViewLoadURL:             "LoadURL",
 	embeddedWebViewGetURL:              "GetURL",
 	embeddedWebViewGetTitle:            "GetTitle",

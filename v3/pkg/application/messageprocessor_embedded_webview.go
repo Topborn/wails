@@ -25,7 +25,7 @@ func (m *MessageProcessor) processEmbeddedWebViewMethod(req *RuntimeRequest, win
 	if err != nil {
 		return nil, errs.WrapInvalidRuntimeCallErrorf(err, "invalid embedded WebView")
 	}
-	return m.callEmbeddedWebView(view, req.Method, args)
+	return m.callEmbeddedWebView(view, req.Method, args, req.Args)
 }
 
 func (m *MessageProcessor) createEmbeddedWebView(req *RuntimeRequest, parent *WebviewWindow, args *MapArgs) (any, error) {
@@ -54,7 +54,7 @@ func (m *MessageProcessor) createEmbeddedWebView(req *RuntimeRequest, parent *We
 	return map[string]any{"id": view.id}, nil
 }
 
-func (m *MessageProcessor) callEmbeddedWebView(view *embeddedWebView, method int, args *MapArgs) (any, error) {
+func (m *MessageProcessor) callEmbeddedWebView(view *embeddedWebView, method int, args *MapArgs, raw *Args) (any, error) {
 	view.mu.RLock()
 	destroyed, crashed, recovering, impl := view.destroyed, view.crashed, view.recovering, view.impl
 	view.mu.RUnlock()
@@ -85,6 +85,22 @@ func (m *MessageProcessor) callEmbeddedWebView(view *embeddedWebView, method int
 		view.options.Bounds = bounds
 		view.mu.Unlock()
 		return unit, InvokeSyncWithError(func() error { return impl.setBounds(bounds) })
+	case embeddedWebViewSetExclusions:
+		// rects: [[x, y, width, height], ...] in guest-local CSS px.
+		var payload struct {
+			Rects [][4]int `json:"rects"`
+		}
+		if err := raw.ToStruct(&payload); err != nil {
+			return nil, errs.NewInvalidRuntimeCallErrorf("rects must be an array of [x, y, width, height]: %v", err)
+		}
+		rects := make([]Rect, 0, len(payload.Rects))
+		for _, r := range payload.Rects {
+			if r[2] <= 0 || r[3] <= 0 {
+				continue
+			}
+			rects = append(rects, Rect{X: r[0], Y: r[1], Width: r[2], Height: r[3]})
+		}
+		return unit, InvokeSyncWithError(func() error { return impl.setExclusions(rects) })
 	case embeddedWebViewSetVisible:
 		visible := args.Bool("visible")
 		if visible == nil {

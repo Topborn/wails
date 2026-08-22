@@ -38,6 +38,7 @@ var embeddedWebViewMethods = []protocolEntry{
 	{"embeddedWebViewSetBounds", "SetBounds"},
 	{"embeddedWebViewSetVisible", "SetVisible"},
 	{"embeddedWebViewSetZIndex", "SetZIndex"},
+	{"embeddedWebViewSetExclusions", "SetExclusions"},
 	{"embeddedWebViewLoadURL", "LoadURL"},
 	{"embeddedWebViewGetURL", "GetURL"},
 	{"embeddedWebViewGetTitle", "GetTitle"},

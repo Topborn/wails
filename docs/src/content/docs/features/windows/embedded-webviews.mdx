@@ -119,9 +119,61 @@ Events are standard `CustomEvent`s dispatched on the owning element:
 - `child-process-gone`
 - `render-process-gone`
 - `webview-error`
+- `context-menu` (macOS; see below)
 - `destroyed`
 
 The `render-process-gone` detail contains `reason` and `exitCode`. Wails does not automatically reload a crashed guest; call `reload()` when your application is ready to recover it.
+
+## Drawing host content over a guest
+
+The native guest is composited above the host document, so by default nothing
+in your DOM — a floating panel, a dropdown, a modal — can appear on top of it.
+Mark the elements that may, with `data-wails-overlay`:
+
+```html
+<div data-wails-overlay class="debug-panel">…</div>
+```
+
+On every layout pass the runtime measures marked elements, clips their boxes to
+each guest they overlap, and sends those rectangles to the native view. The
+view masks them out so the host shows through, and declines hit-testing there
+so clicks, hover and wheel events reach your element. Marked elements are
+tracked through the same mutation, resize, scroll and transition/animation-end
+signals that drive guest positioning, so panels that slide or fade in settle
+correctly; position changes made purely from JavaScript without touching the
+DOM (for example a `requestAnimationFrame` loop assigning `style.left`) are
+picked up because `style` is an observed attribute.
+
+Only the element's own boxes are cut out, not its shadow or blur; keep overlay
+effects inside the element's border box. Nested guests inside an overlay are
+never cut out of themselves.
+
+Supported on macOS. On Linux and Windows the call is accepted and ignored, so
+marked elements stay hidden behind the guest there.
+
+## Context menus
+
+A guest never shows the engine's own context menu. A right-click emits a
+`context-menu` `CustomEvent` on the element with a
+`EmbeddedWebViewContextMenuDetail`: `x`/`y` in guest-local CSS px, `linkURL`,
+`srcURL` and `mediaType` (`img`, `video`, `audio` or empty) of the element under
+the pointer, the current `selectionText`, `isEditable` and the element's
+`tagName`. Decide in the host what to show — your own DOM menu (marked
+`data-wails-overlay` so it can sit over the guest), a native menu, or nothing:
+
+```ts
+guest.addEventListener("context-menu", (event) => {
+    const detail = (event as CustomEvent<EmbeddedWebViewContextMenuDetail>).detail;
+    const rect = guest.getBoundingClientRect();
+    showMenu(rect.left + detail.x, rect.top + detail.y, [
+        { label: "Reload", run: () => guest.reload() },
+        { label: "Inspect", run: () => guest.openDevTools() },
+        ...(detail.linkURL ? [{ label: "Copy link", run: () => navigator.clipboard.writeText(detail.linkURL) }] : []),
+    ]);
+});
+```
+
+Supported on macOS; other platforms currently keep the engine's default menu.
 
 ## Isolation and restrictions
 

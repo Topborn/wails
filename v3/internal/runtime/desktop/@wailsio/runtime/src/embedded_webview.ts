@@ -17,6 +17,18 @@ export interface EmbeddedWebViewRenderProcessGoneDetail {
 }
 
 /** Details delivered when an embedded navigation fails. */
+/** Detail of the cancelable `context-menu` event. Coordinates are guest-local CSS px. */
+export interface EmbeddedWebViewContextMenuDetail {
+    x: number;
+    y: number;
+    linkURL: string;
+    srcURL: string;
+    mediaType: "" | "img" | "video" | "audio";
+    selectionText: string;
+    isEditable: boolean;
+    tagName: string;
+}
+
 export interface EmbeddedWebViewLoadFailureDetail {
     errorCode?: number;
     errorDescription: string;
@@ -66,6 +78,37 @@ function flushLayout(): void {
     for (const element of batch) void element.syncLayout(order.get(element) ?? 0);
 }
 
+/**
+ * Attribute that marks host elements allowed to draw over a guest. Their boxes
+ * are cut out of the native view, so the host document shows through and
+ * receives pointer input there. Rects are sent in guest-local CSS px.
+ */
+export const OVERLAY_ATTRIBUTE = "data-wails-overlay";
+
+type ExclusionRect = [number, number, number, number];
+
+function overlayExclusions(guest: Element, bounds: EmbeddedWebViewBounds): ExclusionRect[] {
+    const rects: ExclusionRect[] = [];
+    for (const overlay of document.querySelectorAll(`[${OVERLAY_ATTRIBUTE}]`)) {
+        if (overlay === guest || guest.contains(overlay)) continue;
+        const style = window.getComputedStyle(overlay);
+        if (style.display === "none" || style.visibility === "hidden") continue;
+        for (const rect of overlay.getClientRects()) {
+            const left = Math.max(Math.floor(rect.left), bounds.x);
+            const top = Math.max(Math.floor(rect.top), bounds.y);
+            const right = Math.min(Math.ceil(rect.right), bounds.x + bounds.width);
+            const bottom = Math.min(Math.ceil(rect.bottom), bounds.y + bounds.height);
+            if (right <= left || bottom <= top) continue;
+            rects.push([left - bounds.x, top - bounds.y, right - left, bottom - top]);
+        }
+    }
+    return rects;
+}
+
+function sameExclusions(left: ExclusionRect[], right: ExclusionRect[]): boolean {
+    return left.length === right.length && left.every((rect, i) => rect.every((v, j) => v === right[i][j]));
+}
+
 function computedZIndex(element: Element): number {
     const value = Number.parseInt(window.getComputedStyle(element).zIndex, 10);
     return Number.isFinite(value) ? value : 0;
@@ -107,6 +150,7 @@ export class WailsWebViewElement extends HTMLElementBase {
     #lastBounds: EmbeddedWebViewBounds | null = null;
     #lastVisible = false;
     #lastZIndex = -1;
+    #lastExclusions: ExclusionRect[] = [];
     #manuallyDestroyed = false;
     #sourceSetByMethod = false;
     #disconnectGeneration = 0;
@@ -212,6 +256,13 @@ export class WailsWebViewElement extends HTMLElementBase {
             this.#lastZIndex = zIndex;
             updates.push(caller(methods.SetZIndex, { id, zIndex }));
         }
+        if (bounds) {
+            const exclusions = overlayExclusions(this, bounds);
+            if (!sameExclusions(this.#lastExclusions, exclusions)) {
+                this.#lastExclusions = exclusions;
+                updates.push(caller(methods.SetExclusions, { id, rects: exclusions }));
+            }
+        }
         await Promise.all(updates);
     }
 
@@ -273,12 +324,15 @@ if (hasDOM) {
     if (!customElements.get("wails-webview")) customElements.define("wails-webview", WailsWebViewElement);
     window.addEventListener("resize", () => requestLayout());
     window.addEventListener("scroll", () => requestLayout(), true);
+    // Overlays that slide or fade in settle after the mutation that started it.
+    window.addEventListener("transitionend", () => requestLayout(), true);
+    window.addEventListener("animationend", () => requestLayout(), true);
     if (typeof MutationObserver !== "undefined") {
         new MutationObserver(() => requestLayout()).observe(document.documentElement, {
             attributes: true,
             childList: true,
             subtree: true,
-            attributeFilter: ["class", "style", "hidden"],
+            attributeFilter: ["class", "style", "hidden", OVERLAY_ATTRIBUTE],
         });
     }
 }

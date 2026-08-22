@@ -73,6 +73,18 @@ func (v *macosEmbeddedWebView) setBounds(bounds Rect) error {
 	C.embeddedWebViewSetBounds(v.view, C.int(bounds.X), C.int(bounds.Y), C.int(bounds.Width), C.int(bounds.Height))
 	return nil
 }
+func (v *macosEmbeddedWebView) setExclusions(rects []Rect) error {
+	if len(rects) == 0 {
+		C.embeddedWebViewSetExclusions(v.view, nil, 0)
+		return nil
+	}
+	flat := make([]C.int, 0, len(rects)*4)
+	for _, r := range rects {
+		flat = append(flat, C.int(r.X), C.int(r.Y), C.int(r.Width), C.int(r.Height))
+	}
+	C.embeddedWebViewSetExclusions(v.view, &flat[0], C.int(len(rects)))
+	return nil
+}
 func (v *macosEmbeddedWebView) setVisible(visible bool) error {
 	C.embeddedWebViewSetVisible(v.view, C.bool(visible))
 	return nil
@@ -243,6 +255,20 @@ func embeddedWebViewProcessTerminated(windowID, viewID C.uint, reason *C.char, e
 		reasonValue := C.GoString(reason)
 		go view.markCrashed(reasonValue, int(exitCode))
 	}
+}
+
+//export embeddedWebViewContextMenu
+func embeddedWebViewContextMenu(windowID, viewID C.uint, x, y C.int, payload *C.char) {
+	view := nativeEmbeddedWebView(uint(windowID), uint(viewID))
+	if view == nil {
+		return
+	}
+	detail := map[string]any{}
+	if payload != nil {
+		_ = json.Unmarshal([]byte(C.GoString(payload)), &detail)
+	}
+	detail["x"], detail["y"] = int(x), int(y)
+	go view.emit("context-menu", detail)
 }
 
 //export embeddedWebViewPopupBlocked

@@ -3,6 +3,7 @@
 #import "embedded_webview_darwin.h"
 #import "webview_window_darwin.h"
 #import <WebKit/WebKit.h>
+#import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 
 extern bool embeddedWebViewNavigationAllowed(unsigned int, unsigned int, const char*, bool, bool);
@@ -24,6 +25,85 @@ static const void *WailsEmbeddedZIndexKey = &WailsEmbeddedZIndexKey;
 @property unsigned int viewID;
 @property BOOL allowCamera;
 @property BOOL allowMicrophone;
+@end
+
+// Rectangles (view-local, top-left origin, CSS px) the host document draws
+// over this guest. They are cut out of the layer mask so the host shows
+// through, and hitTest: declines them so clicks reach the host DOM.
+@interface WailsEmbeddedWebView : WKWebView
+@property (nonatomic, retain) NSArray<NSValue*> *exclusions;
+@property unsigned int windowID;
+@property unsigned int viewID;
+@end
+
+@implementation WailsEmbeddedWebView
+- (void)dealloc {
+    [_exclusions release];
+    [super dealloc];
+}
+- (BOOL)pointExcluded:(NSPoint)local {
+    for (NSValue *value in self.exclusions) {
+        if (NSPointInRect(local, value.rectValue)) return YES;
+    }
+    return NO;
+}
+- (NSView *)hitTest:(NSPoint)point {
+    if (self.exclusions.count > 0 && self.superview != nil) {
+        NSPoint local = [self convertPoint:point fromView:self.superview];
+        if ([self pointExcluded:local]) return nil;
+    }
+    return [super hitTest:point];
+}
+- (void)updateMask {
+    if (self.exclusions.count == 0) {
+        self.layer.mask = nil;
+        return;
+    }
+    self.wantsLayer = YES;
+    CGFloat height = self.bounds.size.height;
+    BOOL flipped = self.layer.geometryFlipped;
+    CGMutablePathRef path = CGPathCreateMutable();
+    CGPathAddRect(path, NULL, self.bounds);
+    for (NSValue *value in self.exclusions) {
+        NSRect rect = NSIntersectionRect(value.rectValue, self.bounds);
+        if (NSIsEmptyRect(rect)) continue;
+        if (!flipped) rect.origin.y = height - rect.origin.y - rect.size.height;
+        CGPathAddRect(path, NULL, rect);
+    }
+    CAShapeLayer *mask = [CAShapeLayer layer];
+    mask.frame = self.bounds;
+    mask.fillRule = kCAFillRuleEvenOdd;
+    mask.path = path;
+    CGPathRelease(path);
+    self.layer.mask = mask;
+}
+- (void)setFrameSize:(NSSize)size {
+    [super setFrameSize:size];
+    if (self.exclusions.count > 0) [self updateMask];
+}
+- (void)setExclusionRects:(NSArray<NSValue*> *)rects {
+    self.exclusions = rects;
+    [self updateMask];
+}
+// The guest never shows WebKit's own menu: the host is told where the click
+// landed and what sits under it, and decides what (if anything) to show.
+- (void)willOpenMenu:(NSMenu *)menu withEvent:(NSEvent *)event {
+    [menu removeAllItems];
+    NSPoint local = [self convertPoint:event.locationInWindow fromView:nil];
+    if (!self.isFlipped) local.y = self.bounds.size.height - local.y;
+    int x = (int)local.x, y = (int)local.y;
+    NSString *probe = [NSString stringWithFormat:@"(function(){"
+        "var e=document.elementFromPoint(%d,%d);var a=e&&e.closest?e.closest('a[href]'):null;"
+        "var m=e&&e.closest?e.closest('img,video,audio'):null;var s=window.getSelection?String(window.getSelection()):'';"
+        "var ed=!!(e&&(e.isContentEditable||/^(INPUT|TEXTAREA)$/.test(e.tagName)));"
+        "return JSON.stringify({linkURL:a?a.href:'',srcURL:m?(m.currentSrc||m.src||''):'',"
+        "mediaType:m?m.tagName.toLowerCase():'',selectionText:s,isEditable:ed,tagName:e?e.tagName.toLowerCase():''});})()", x, y];
+    unsigned int windowID = self.windowID, viewID = self.viewID;
+    [self evaluateJavaScript:probe completionHandler:^(id result, NSError *error) {
+        const char *json = [result isKindOfClass:[NSString class]] ? ((NSString *)result).UTF8String : "{}";
+        embeddedWebViewContextMenu(windowID, viewID, x, y, (char *)json);
+    }];
+}
 @end
 
 static NSMutableArray<WKWebView*> *embeddedViews(WebviewWindow *window) {
@@ -171,8 +251,10 @@ void* embeddedWebViewCreate(void* pointer, unsigned int windowID, unsigned int v
     delegate.allowMicrophone = allowMicrophone;
     if (allowLocalAssets) [config setURLSchemeHandler:delegate forURLScheme:@"wails"];
 
-    WKWebView *view = [[WKWebView alloc] initWithFrame:embeddedFrame(window, x, y, width, height) configuration:config];
+    WailsEmbeddedWebView *view = [[WailsEmbeddedWebView alloc] initWithFrame:embeddedFrame(window, x, y, width, height) configuration:config];
     [config release];
+    view.windowID = windowID;
+    view.viewID = viewID;
     view.navigationDelegate = delegate;
     view.UIDelegate = delegate;
     view.hidden = !visible;
@@ -212,6 +294,16 @@ void embeddedWebViewSetBounds(void* pointer, int x, int y, int width, int height
     WKWebView *view = (WKWebView *)pointer;
     WebviewWindow *window = (WebviewWindow *)view.window;
     if (view != nil && window != nil) view.frame = embeddedFrame(window, x, y, width, height);
+}
+void embeddedWebViewSetExclusions(void* pointer, const int* rects, int count) {
+    WailsEmbeddedWebView *view = (WailsEmbeddedWebView *)pointer;
+    if (view == nil || ![view isKindOfClass:[WailsEmbeddedWebView class]]) return;
+    NSMutableArray<NSValue*> *values = [NSMutableArray arrayWithCapacity:count];
+    for (int i = 0; i < count; i++) {
+        NSRect rect = NSMakeRect(rects[i*4], rects[i*4+1], rects[i*4+2], rects[i*4+3]);
+        if (rect.size.width > 0 && rect.size.height > 0) [values addObject:[NSValue valueWithRect:rect]];
+    }
+    [view setExclusionRects:values];
 }
 void embeddedWebViewSetVisible(void* pointer, bool visible) { ((WKWebView *)pointer).hidden = !visible; }
 void embeddedWebViewSetZIndex(void* pointer, int zIndex) {

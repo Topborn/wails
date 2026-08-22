@@ -40,6 +40,31 @@ afterEach(async () => {
 });
 
 describe("wails-webview", () => {
+    it("cuts host overlays out of the guest in guest-local coordinates", async () => {
+        await element.getURL();
+        call.mockClear();
+
+        const overlay = document.createElement("div");
+        overlay.setAttribute("data-wails-overlay", "");
+        // Partly outside the guest (12,24 → 332,204): clipped to its box.
+        overlay.getClientRects = () => [{ left: 0, top: 100, right: 100, bottom: 300 }];
+        document.body.append(overlay);
+        await element.syncLayout(0);
+
+        expect(call).toHaveBeenCalledWith(objectNames.EmbeddedWebView, methods.SetExclusions, "", {
+            id: 42,
+            rects: [[0, 76, 88, 104]],
+        });
+
+        // Unchanged overlays are not resent; removing them clears the cut-out.
+        call.mockClear();
+        await element.syncLayout(0);
+        expect(call).not.toHaveBeenCalledWith(objectNames.EmbeddedWebView, methods.SetExclusions, "", expect.anything());
+        overlay.remove();
+        await element.syncLayout(0);
+        expect(call).toHaveBeenCalledWith(objectNames.EmbeddedWebView, methods.SetExclusions, "", { id: 42, rects: [] });
+    });
+
     it("creates an isolated backend view from its DOM bounds", async () => {
         await expect(element.getURL()).resolves.toBe("https://example.com/");
 

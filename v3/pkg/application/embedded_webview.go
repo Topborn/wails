@@ -77,6 +77,10 @@ type embeddedWebViewImpl interface {
 	setBounds(Rect) error
 	setVisible(bool) error
 	setZIndex(int) error
+	// setExclusions cuts the given guest-local rectangles out of the native
+	// view so host content marked as an overlay shows through and receives
+	// input there. Platforms without masking accept and ignore the call.
+	setExclusions([]Rect) error
 	loadURL(string) error
 	url() (string, error)
 	title() (string, error)
