@@ -72,7 +72,6 @@ export {
     type EmbeddedWebViewBounds,
     type EmbeddedWebViewLoadFailureDetail,
     type EmbeddedWebViewContextMenuDetail,
-    OVERLAY_ATTRIBUTE,
     type EmbeddedWebViewRenderProcessGoneDetail,
 } from "./embedded_webview.js";
 

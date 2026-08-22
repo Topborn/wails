@@ -9,7 +9,7 @@
 void* embeddedWebViewCreate(void* window, unsigned int windowID, unsigned int viewID,
     int x, int y, int width, int height, int zIndex, bool visible,
     const char* url, const char* userAgent, bool allowLocalAssets,
-    bool allowCamera, bool allowMicrophone);
+    bool allowCamera, bool allowMicrophone, bool devTools);
 void embeddedWebViewDestroy(void* view);
 void embeddedWebViewSetBounds(void* view, int x, int y, int width, int height);
 void embeddedWebViewSetVisible(void* view, bool visible);

@@ -55,7 +55,7 @@ func (v *macosEmbeddedWebView) create() error {
 	v.view = C.embeddedWebViewCreate(windowImpl.nsWindow, C.uint(v.parent.parent.id), C.uint(v.parent.id),
 		C.int(options.Bounds.X), C.int(options.Bounds.Y), C.int(options.Bounds.Width), C.int(options.Bounds.Height),
 		C.int(options.ZIndex), C.bool(options.Visible), URL, userAgent, C.bool(v.parent.policy.AllowLocalAssets),
-		C.bool(allowCamera), C.bool(allowMicrophone))
+		C.bool(allowCamera), C.bool(allowMicrophone), C.bool(v.parent.policy.DevToolsEnabled))
 	if v.view == nil {
 		return errors.New("WKWebView creation failed")
 	}

@@ -79,34 +79,45 @@ function flushLayout(): void {
 }
 
 /**
- * Host content that paints above a guest shows through it automatically: the
- * runtime keeps track of positioned elements that take part in z-ordering and,
- * for each one overlapping a guest, asks the engine (elementsFromPoint) whether
- * it really stacks above the `<wails-webview>` element. The covered boxes are
- * cut out of the native view so the host document is visible and receives
- * pointer input there. An element the engine cannot hit-test (pointer-events:
- * none) is never detected; mark it with this attribute to force the cut-out.
+ * Host content that paints above a guest shows through it. The runtime applies
+ * the CSS painting-order rules itself — stacking contexts, the layer order
+ * inside each (negative z-index, in-flow, positioned with z-index auto/0,
+ * positive z-index), DOM order as the tie-break — to decide whether an element
+ * stacks above the `<wails-webview>` element. No hit-testing is involved, so
+ * it also holds for `pointer-events: none` content. The covered boxes are cut
+ * out of the native view, so the host document is visible and receives
+ * pointer input there.
  */
-export const OVERLAY_ATTRIBUTE = "data-wails-overlay";
-
 type ExclusionRect = [number, number, number, number];
 
-// Elements that can stack above a guest. Maintained incrementally from the
-// mutation observer so a layout pass only touches these, not the whole DOM.
+// Elements that could stack above a guest: anything positioned or forming a
+// stacking context. Maintained incrementally from the mutation observer so a
+// layout pass only looks at these, never the whole document.
 const stackingCandidates = new Set<Element>();
+
+function createsStackingContext(style: CSSStyleDeclaration, parentStyle: CSSStyleDeclaration | null): boolean {
+    const positioned = style.position !== "" && style.position !== "static";
+    if (positioned && style.zIndex !== "auto") return true;
+    if (style.position === "fixed" || style.position === "sticky") return true;
+    if (style.zIndex !== "auto" && parentStyle && /^(flex|grid|inline-flex|inline-grid)$/.test(parentStyle.display)) return true;
+    if (Number.parseFloat(style.opacity) < 1) return true;
+    if (style.transform !== "none" || style.filter !== "none" || style.perspective !== "none") return true;
+    if (style.backdropFilter && style.backdropFilter !== "none") return true;
+    if (style.mixBlendMode !== "normal" || style.isolation === "isolate") return true;
+    if (/transform|opacity|filter|perspective|z-index/.test(style.willChange)) return true;
+    if (/paint|layout|strict|content/.test(style.contain)) return true;
+    return style.clipPath !== "none" || style.maskImage !== "none";
+}
 
 function classifyStacking(element: Element): void {
     if (element instanceof WailsWebViewElement) {
         stackingCandidates.delete(element);
         return;
     }
-    if (element.hasAttribute(OVERLAY_ATTRIBUTE)) {
-        stackingCandidates.add(element);
-        return;
-    }
     const style = window.getComputedStyle(element);
+    const parent = element.parentElement;
     const positioned = style.position !== "" && style.position !== "static";
-    if (positioned && (style.zIndex !== "auto" || style.position === "fixed")) stackingCandidates.add(element);
+    if (positioned || createsStackingContext(style, parent ? window.getComputedStyle(parent) : null)) stackingCandidates.add(element);
     else stackingCandidates.delete(element);
 }
 
@@ -117,14 +128,98 @@ export function scanStacking(root: Node): void {
     for (const element of root.querySelectorAll("*")) classifyStacking(element);
 }
 
-function paintsAbove(candidate: Element, guest: Element, x: number, y: number): boolean {
-    if (candidate.hasAttribute(OVERLAY_ATTRIBUTE)) return true;
-    if (typeof document.elementsFromPoint !== "function") return false;
-    for (const hit of document.elementsFromPoint(x, y)) {
-        if (hit === guest || guest.contains(hit)) return false;
-        if (hit === candidate || candidate.contains(hit)) return true;
+// Where an element paints inside its nearest stacking context: layer first
+// (negative z-index < in-flow < positioned z auto/0 < positive z-index), then
+// z-index, then DOM order.
+interface PaintKey {
+    layer: number;
+    z: number;
+    element: Element;
+}
+
+function paintKey(element: Element, context: Element): PaintKey {
+    // A non-positioned element paints with its nearest positioned ancestor
+    // below the context, since that ancestor is the item the context orders.
+    let item: Element = element;
+    for (let e: Element | null = element; e && e !== context; e = e.parentElement) {
+        const st = window.getComputedStyle(e);
+        if (st.position !== "" && st.position !== "static") {
+            item = e;
+            break;
+        }
     }
-    return false;
+    const style = window.getComputedStyle(item);
+    const positioned = style.position !== "" && style.position !== "static";
+    const parent = item.parentElement;
+    const isContext = createsStackingContext(style, parent ? window.getComputedStyle(parent) : null);
+    const z = style.zIndex === "auto" ? 0 : Number.parseInt(style.zIndex, 10) || 0;
+    if (!positioned && !isContext) return { layer: 1, z: 0, element: item };
+    if (z < 0) return { layer: 0, z, element: item };
+    if (z === 0) return { layer: 2, z: 0, element: item };
+    return { layer: 3, z, element: item };
+}
+
+// Stacking contexts from the root down to (and including) the element's own
+// nearest context. The element itself is not part of the path.
+function contextPath(element: Element): Element[] {
+    const path: Element[] = [];
+    for (let e = element.parentElement; e; e = e.parentElement) {
+        if (e === document.documentElement) break;
+        const st = window.getComputedStyle(e);
+        if (createsStackingContext(st, e.parentElement ? window.getComputedStyle(e.parentElement) : null)) path.push(e);
+    }
+    path.push(document.documentElement);
+    return path.reverse();
+}
+
+function comparePaint(a: PaintKey, b: PaintKey): number {
+    if (a.layer !== b.layer) return a.layer - b.layer;
+    if (a.z !== b.z) return a.z - b.z;
+    if (a.element === b.element) return 0;
+    return a.element.compareDocumentPosition(b.element) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+}
+
+/** @internal Whether `candidate` paints above `guest` by the CSS stacking rules. */
+export function paintsAbove(candidate: Element, guest: Element): boolean {
+    const pa = contextPath(candidate);
+    const pb = contextPath(guest);
+    let i = 0;
+    while (i < pa.length && i < pb.length && pa[i] === pb[i]) i++;
+    const shared = pa[i - 1];
+    // The first point where the two diverge: either a deeper context of one
+    // side, or the element itself, ordered within the shared context.
+    const itemA = i < pa.length ? pa[i] : candidate;
+    const itemB = i < pb.length ? pb[i] : guest;
+    return comparePaint(paintKey(itemA, shared), paintKey(itemB, shared)) > 0;
+}
+
+// Split overlapping rectangles into a disjoint set covering the same area, so
+// the native even-odd mask never re-fills an overlap.
+function disjoint(rects: ExclusionRect[]): ExclusionRect[] {
+    const out: ExclusionRect[] = [];
+    for (const rect of rects) {
+        let pieces: ExclusionRect[] = [rect];
+        for (const placed of out) {
+            const next: ExclusionRect[] = [];
+            for (const [x, y, w, h] of pieces) {
+                const [px, py, pw, ph] = placed;
+                const ix = Math.max(x, px), iy = Math.max(y, py);
+                const ax = Math.min(x + w, px + pw), ay = Math.min(y + h, py + ph);
+                if (ax <= ix || ay <= iy) {
+                    next.push([x, y, w, h]);
+                    continue;
+                }
+                if (iy > y) next.push([x, y, w, iy - y]);
+                if (ay < y + h) next.push([x, ay, w, y + h - ay]);
+                if (ix > x) next.push([x, iy, ix - x, ay - iy]);
+                if (ax < x + w) next.push([ax, iy, x + w - ax, ay - iy]);
+            }
+            pieces = next;
+            if (pieces.length === 0) break;
+        }
+        out.push(...pieces);
+    }
+    return out;
 }
 
 function overlayExclusions(guest: Element, bounds: EmbeddedWebViewBounds): ExclusionRect[] {
@@ -135,18 +230,23 @@ function overlayExclusions(guest: Element, bounds: EmbeddedWebViewBounds): Exclu
             continue;
         }
         if (candidate === guest || guest.contains(candidate) || candidate.contains(guest)) continue;
+        const style = window.getComputedStyle(candidate);
+        if (style.display === "none" || style.visibility === "hidden") continue;
+        let above: boolean | null = null;
         for (const rect of candidate.getClientRects()) {
             const left = Math.max(Math.floor(rect.left), bounds.x);
             const top = Math.max(Math.floor(rect.top), bounds.y);
             const right = Math.min(Math.ceil(rect.right), bounds.x + bounds.width);
             const bottom = Math.min(Math.ceil(rect.bottom), bounds.y + bounds.height);
             if (right <= left || bottom <= top) continue;
-            if (!paintsAbove(candidate, guest, (left + right) / 2, (top + bottom) / 2)) continue;
+            above ??= paintsAbove(candidate, guest);
+            if (!above) break;
             rects.push([left - bounds.x, top - bounds.y, right - left, bottom - top]);
         }
     }
-    rects.sort((a, b) => a[1] - b[1] || a[0] - b[0] || a[2] - b[2] || a[3] - b[3]);
-    return rects;
+    const merged = disjoint(rects);
+    merged.sort((a, b) => a[1] - b[1] || a[0] - b[0] || a[2] - b[2] || a[3] - b[3]);
+    return merged;
 }
 
 function sameExclusions(left: ExclusionRect[], right: ExclusionRect[]): boolean {
@@ -383,7 +483,7 @@ if (hasDOM) {
             attributes: true,
             childList: true,
             subtree: true,
-            attributeFilter: ["class", "style", "hidden", OVERLAY_ATTRIBUTE],
+            attributeFilter: ["class", "style", "hidden"],
         });
     }
 }

@@ -237,7 +237,7 @@ static NSRect embeddedFrame(WebviewWindow *window, int x, int y, int width, int 
 void* embeddedWebViewCreate(void* pointer, unsigned int windowID, unsigned int viewID,
     int x, int y, int width, int height, int zIndex, bool visible,
     const char* url, const char* userAgent, bool allowLocalAssets,
-    bool allowCamera, bool allowMicrophone) {
+    bool allowCamera, bool allowMicrophone, bool devTools) {
     WebviewWindow *window = (WebviewWindow *)pointer;
     if (window == nil || window.contentView == nil) return nil;
 
@@ -255,6 +255,8 @@ void* embeddedWebViewCreate(void* pointer, unsigned int windowID, unsigned int v
     [config release];
     view.windowID = windowID;
     view.viewID = viewID;
+    // Web Inspector only attaches to views flagged inspectable (macOS 13.3+).
+    if (devTools && [view respondsToSelector:@selector(setInspectable:)]) [view setInspectable:YES];
     view.navigationDelegate = delegate;
     view.UIDelegate = delegate;
     view.hidden = !visible;
