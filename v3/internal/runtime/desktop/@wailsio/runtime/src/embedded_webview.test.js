@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { WailsWebViewElement } from "./embedded_webview";
+import { WailsWebViewElement, scanStacking } from "./embedded_webview";
 import { embeddedWebViewMethods as methods, objectNames } from "./protocol.generated";
 import { setTransport } from "./runtime";
 
@@ -40,29 +40,52 @@ afterEach(async () => {
 });
 
 describe("wails-webview", () => {
-    it("cuts host overlays out of the guest in guest-local coordinates", async () => {
+    it("cuts host content that stacks above the guest out of it", async () => {
         await element.getURL();
         call.mockClear();
 
-        const overlay = document.createElement("div");
-        overlay.setAttribute("data-wails-overlay", "");
+        const panel = document.createElement("div");
+        panel.style.position = "fixed";
+        panel.style.zIndex = "50";
         // Partly outside the guest (12,24 → 332,204): clipped to its box.
-        overlay.getClientRects = () => [{ left: 0, top: 100, right: 100, bottom: 300 }];
-        document.body.append(overlay);
+        panel.getClientRects = () => [{ left: 0, top: 100, right: 100, bottom: 300 }];
+        document.body.append(panel);
+        scanStacking(panel);
+        // The engine decides stacking: the panel is hit before the guest.
+        document.elementsFromPoint = vi.fn(() => [panel, element, document.body]);
         await element.syncLayout(0);
 
+        expect(document.elementsFromPoint).toHaveBeenCalledWith(56, 152);
         expect(call).toHaveBeenCalledWith(objectNames.EmbeddedWebView, methods.SetExclusions, "", {
             id: 42,
             rects: [[0, 76, 88, 104]],
         });
 
-        // Unchanged overlays are not resent; removing them clears the cut-out.
+        // Unchanged stacking is not resent; a guest that wins z-order clears the cut-out.
         call.mockClear();
         await element.syncLayout(0);
         expect(call).not.toHaveBeenCalledWith(objectNames.EmbeddedWebView, methods.SetExclusions, "", expect.anything());
-        overlay.remove();
+        document.elementsFromPoint = vi.fn(() => [element, panel, document.body]);
         await element.syncLayout(0);
         expect(call).toHaveBeenCalledWith(objectNames.EmbeddedWebView, methods.SetExclusions, "", { id: 42, rects: [] });
+        panel.remove();
+        delete document.elementsFromPoint;
+    });
+
+    it("forces a cut-out for elements marked data-wails-overlay", async () => {
+        await element.getURL();
+        call.mockClear();
+        const toast = document.createElement("div");
+        toast.setAttribute("data-wails-overlay", "");
+        toast.getClientRects = () => [{ left: 20, top: 30, right: 60, bottom: 50 }];
+        document.body.append(toast);
+        scanStacking(toast);
+        await element.syncLayout(0);
+        expect(call).toHaveBeenCalledWith(objectNames.EmbeddedWebView, methods.SetExclusions, "", {
+            id: 42,
+            rects: [[8, 6, 40, 20]],
+        });
+        toast.remove();
     });
 
     it("creates an isolated backend view from its DOM bounds", async () => {

@@ -126,30 +126,29 @@ The `render-process-gone` detail contains `reason` and `exitCode`. Wails does no
 
 ## Drawing host content over a guest
 
-The native guest is composited above the host document, so by default nothing
-in your DOM — a floating panel, a dropdown, a modal — can appear on top of it.
-Mark the elements that may, with `data-wails-overlay`:
+The native guest is composited above the host document, which would normally
+hide any DOM that overlaps it. Instead the runtime makes CSS stacking hold: a
+dropdown, modal, toast or floating panel that paints above the
+`<wails-webview>` element by the usual rules — `position` plus `z-index`, or
+`position: fixed` — shows through the guest and receives pointer input there.
+Give the element itself a `z-index` to put it above such content.
 
-```html
-<div data-wails-overlay class="debug-panel">…</div>
-```
+How it works: the runtime keeps a set of positioned elements that take part in
+z-ordering (maintained from the same mutation observer that tracks guest
+geometry, so a layout pass never walks the whole document). For each one that
+overlaps a guest it asks the engine, via `elementsFromPoint`, whether that
+element really stacks above the guest element, then sends the covered boxes to
+the native view, which masks them out and declines hit-testing inside them.
+Scroll, resize, attribute changes and transition/animation ends all trigger a
+recheck.
 
-On every layout pass the runtime measures marked elements, clips their boxes to
-each guest they overlap, and sends those rectangles to the native view. The
-view masks them out so the host shows through, and declines hit-testing there
-so clicks, hover and wheel events reach your element. Marked elements are
-tracked through the same mutation, resize, scroll and transition/animation-end
-signals that drive guest positioning, so panels that slide or fade in settle
-correctly; position changes made purely from JavaScript without touching the
-DOM (for example a `requestAnimationFrame` loop assigning `style.left`) are
-picked up because `style` is an observed attribute.
-
-Only the element's own boxes are cut out, not its shadow or blur; keep overlay
-effects inside the element's border box. Nested guests inside an overlay are
-never cut out of themselves.
+Limits: only the element's own boxes are cut out, not its shadow or blur, so
+keep such effects inside the border box. An element the engine cannot hit-test
+(`pointer-events: none`) is never detected; mark it `data-wails-overlay` to
+force the cut-out. Nothing inside a guest can be cut out of that guest.
 
 Supported on macOS. On Linux and Windows the call is accepted and ignored, so
-marked elements stay hidden behind the guest there.
+host content stays hidden behind the guest there.
 
 ## Context menus
 

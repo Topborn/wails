@@ -79,29 +79,73 @@ function flushLayout(): void {
 }
 
 /**
- * Attribute that marks host elements allowed to draw over a guest. Their boxes
- * are cut out of the native view, so the host document shows through and
- * receives pointer input there. Rects are sent in guest-local CSS px.
+ * Host content that paints above a guest shows through it automatically: the
+ * runtime keeps track of positioned elements that take part in z-ordering and,
+ * for each one overlapping a guest, asks the engine (elementsFromPoint) whether
+ * it really stacks above the `<wails-webview>` element. The covered boxes are
+ * cut out of the native view so the host document is visible and receives
+ * pointer input there. An element the engine cannot hit-test (pointer-events:
+ * none) is never detected; mark it with this attribute to force the cut-out.
  */
 export const OVERLAY_ATTRIBUTE = "data-wails-overlay";
 
 type ExclusionRect = [number, number, number, number];
 
+// Elements that can stack above a guest. Maintained incrementally from the
+// mutation observer so a layout pass only touches these, not the whole DOM.
+const stackingCandidates = new Set<Element>();
+
+function classifyStacking(element: Element): void {
+    if (element instanceof WailsWebViewElement) {
+        stackingCandidates.delete(element);
+        return;
+    }
+    if (element.hasAttribute(OVERLAY_ATTRIBUTE)) {
+        stackingCandidates.add(element);
+        return;
+    }
+    const style = window.getComputedStyle(element);
+    const positioned = style.position !== "" && style.position !== "static";
+    if (positioned && (style.zIndex !== "auto" || style.position === "fixed")) stackingCandidates.add(element);
+    else stackingCandidates.delete(element);
+}
+
+/** @internal Re-classify an element and everything below it. */
+export function scanStacking(root: Node): void {
+    if (!(root instanceof Element)) return;
+    classifyStacking(root);
+    for (const element of root.querySelectorAll("*")) classifyStacking(element);
+}
+
+function paintsAbove(candidate: Element, guest: Element, x: number, y: number): boolean {
+    if (candidate.hasAttribute(OVERLAY_ATTRIBUTE)) return true;
+    if (typeof document.elementsFromPoint !== "function") return false;
+    for (const hit of document.elementsFromPoint(x, y)) {
+        if (hit === guest || guest.contains(hit)) return false;
+        if (hit === candidate || candidate.contains(hit)) return true;
+    }
+    return false;
+}
+
 function overlayExclusions(guest: Element, bounds: EmbeddedWebViewBounds): ExclusionRect[] {
     const rects: ExclusionRect[] = [];
-    for (const overlay of document.querySelectorAll(`[${OVERLAY_ATTRIBUTE}]`)) {
-        if (overlay === guest || guest.contains(overlay)) continue;
-        const style = window.getComputedStyle(overlay);
-        if (style.display === "none" || style.visibility === "hidden") continue;
-        for (const rect of overlay.getClientRects()) {
+    for (const candidate of stackingCandidates) {
+        if (!candidate.isConnected) {
+            stackingCandidates.delete(candidate);
+            continue;
+        }
+        if (candidate === guest || guest.contains(candidate) || candidate.contains(guest)) continue;
+        for (const rect of candidate.getClientRects()) {
             const left = Math.max(Math.floor(rect.left), bounds.x);
             const top = Math.max(Math.floor(rect.top), bounds.y);
             const right = Math.min(Math.ceil(rect.right), bounds.x + bounds.width);
             const bottom = Math.min(Math.ceil(rect.bottom), bounds.y + bounds.height);
             if (right <= left || bottom <= top) continue;
+            if (!paintsAbove(candidate, guest, (left + right) / 2, (top + bottom) / 2)) continue;
             rects.push([left - bounds.x, top - bounds.y, right - left, bottom - top]);
         }
     }
+    rects.sort((a, b) => a[1] - b[1] || a[0] - b[0] || a[2] - b[2] || a[3] - b[3]);
     return rects;
 }
 
@@ -327,8 +371,15 @@ if (hasDOM) {
     // Overlays that slide or fade in settle after the mutation that started it.
     window.addEventListener("transitionend", () => requestLayout(), true);
     window.addEventListener("animationend", () => requestLayout(), true);
+    scanStacking(document.documentElement);
     if (typeof MutationObserver !== "undefined") {
-        new MutationObserver(() => requestLayout()).observe(document.documentElement, {
+        new MutationObserver(records => {
+            for (const record of records) {
+                if (record.type === "childList") record.addedNodes.forEach(scanStacking);
+                else scanStacking(record.target);
+            }
+            requestLayout();
+        }).observe(document.documentElement, {
             attributes: true,
             childList: true,
             subtree: true,
