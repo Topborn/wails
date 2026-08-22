@@ -211,6 +211,12 @@ type WebviewWindow struct {
 	pendingJS      []string
 	pendingJSMutex sync.Mutex
 
+	// Embedded WebViews are owned by the currently loaded runtime client. A
+	// host-page reload receives a new client ID and tears down stale guests.
+	embeddedWebViewsMu sync.RWMutex
+	embeddedWebViews   map[uint]*embeddedWebView
+	runtimeClientID    string
+
 	// unconditionallyClose marks the window to be unconditionally closed (atomic)
 	unconditionallyClose uint32
 
@@ -284,6 +290,7 @@ func (w *WebviewWindow) markAsDestroyed() {
 	w.destroyedLock.Lock()
 	w.destroyed = true
 	w.destroyedLock.Unlock()
+	w.destroyEmbeddedWebViewsExcept("")
 
 	// Release anyone blocked on a full queue. Done outside destroyedLock so the
 	// lock order between it and eventQueueMu is always one-way.
@@ -351,13 +358,15 @@ func NewWindow(options WebviewWindowOptions) *WebviewWindow {
 	// have to hand-roll a dispatch receiver and an invoke caller every
 	// time. See inline_event_shim.go.
 	options.HTML = maybeInjectInlineEventShim(options.HTML, options.AllowSimpleEventEmit)
+	options.EmbeddedWebViews = cloneEmbeddedWebViewPolicy(options.EmbeddedWebViews)
 
 	result := &WebviewWindow{
-		id:             thisWindowID,
-		options:        options,
-		eventListeners: make(map[uint][]*WindowEventListener),
-		eventHooks:     make(map[uint][]*WindowEventListener),
-		menuBindings:   make(map[string]*MenuItem),
+		id:               thisWindowID,
+		options:          options,
+		eventListeners:   make(map[uint][]*WindowEventListener),
+		eventHooks:       make(map[uint][]*WindowEventListener),
+		menuBindings:     make(map[string]*MenuItem),
+		embeddedWebViews: make(map[uint]*embeddedWebView),
 	}
 
 	result.setupEventMapping()
@@ -839,7 +848,10 @@ func (w *WebviewWindow) HandleMessage(message string) {
 	case strings.HasPrefix(message, "wails:non-client-region:"):
 		message = strings.Replace(message, "wails:non-client-region:", "", 1)
 		w.handleNonClientRegionMessage(message)
-	case message == "wails:runtime:ready":
+	case message == "wails:runtime:ready" || strings.HasPrefix(message, "wails:runtime:ready:"):
+		if clientID, ok := strings.CutPrefix(message, "wails:runtime:ready:"); ok {
+			w.setRuntimeClientID(clientID)
+		}
 		w.emit(events.Common.WindowRuntimeReady)
 		w.pendingJSMutex.Lock()
 		w.runtimeLoaded = true

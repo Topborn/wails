@@ -27,22 +27,23 @@ type dragInfo struct {
 }
 
 type linuxWebviewWindow struct {
-	id            uint
-	application   pointer
-	window        pointer
-	webview       pointer
-	parent        *WebviewWindow
-	menubar       pointer
-	vbox          pointer
-	accels        pointer
-	lastWidth     int
-	lastHeight    int
-	windowState   linuxWindowState
-	stateObserved bool
-	drag          dragInfo
-	lastX, lastY  int
-	gtkmenu       pointer
-	ctxMenuOpened bool
+	id                uint
+	application       pointer
+	window            pointer
+	webview           pointer
+	parent            *WebviewWindow
+	menubar           pointer
+	vbox              pointer
+	embeddedContainer pointer
+	accels            pointer
+	lastWidth         int
+	lastHeight        int
+	windowState       linuxWindowState
+	stateObserved     bool
+	drag              dragInfo
+	lastX, lastY      int
+	gtkmenu           pointer
+	ctxMenuOpened     bool
 
 	moveDebouncer     func(func())
 	resizeDebouncer   func(func())
@@ -353,7 +354,7 @@ func (w *linuxWebviewWindow) run() {
 		w.gtkmenu = (globalApplication.applicationMenu.impl).(*linuxMenu).native
 	}
 
-	w.window, w.webview, w.vbox = windowNew(app.application, w.gtkmenu, w.parent.options.Linux.MenuStyle, w.parent.id, w.parent.options.Linux.WebviewGpuPolicy)
+	w.window, w.webview, w.vbox, w.embeddedContainer = windowNew(app.application, w.gtkmenu, w.parent.options.Linux.MenuStyle, w.parent.id, w.parent.options.Linux.WebviewGpuPolicy)
 	app.registerWindow(w.window, w.parent.id) // record our mapping
 	w.connectSignals()
 	if w.parent.options.EnableFileDrop {

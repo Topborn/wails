@@ -353,11 +353,13 @@ func (a *App) serveEventPayload(rw http.ResponseWriter, req *http.Request) {
 
 const webViewRequestHeaderWindowId = "x-wails-window-id"
 const webViewRequestHeaderWindowName = "x-wails-window-name"
+const webViewRequestHeaderEmbeddedGuest = "x-wails-embedded-webview"
 
 type webViewAssetRequest struct {
-	Request    webview.Request
-	windowId   uint
-	windowName string
+	Request       webview.Request
+	windowId      uint
+	windowName    string
+	embeddedGuest bool
 }
 
 var windowKeyEvents = make(chan *windowKeyEvent, 5)
@@ -385,6 +387,9 @@ func (r *webViewAssetRequest) Header() (http.Header, error) {
 	hh.Set(webViewRequestHeaderWindowId, strconv.FormatUint(uint64(r.windowId), 10))
 	if r.windowName != "" {
 		hh.Set(webViewRequestHeaderWindowName, r.windowName)
+	}
+	if r.embeddedGuest {
+		hh.Set(webViewRequestHeaderEmbeddedGuest, "1")
 	}
 	return hh, nil
 }

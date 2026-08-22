@@ -10,9 +10,10 @@ import (
 )
 
 const (
-	webViewRequestHeaderWindowId   = "x-wails-window-id"
-	webViewRequestHeaderWindowName = "x-wails-window-name"
-	HeaderAcceptLanguage           = "accept-language"
+	webViewRequestHeaderWindowId      = "x-wails-window-id"
+	webViewRequestHeaderWindowName    = "x-wails-window-name"
+	webViewRequestHeaderEmbeddedGuest = "x-wails-embedded-webview"
+	HeaderAcceptLanguage              = "accept-language"
 )
 
 type RuntimeHandler interface {
@@ -67,6 +68,10 @@ func (a *AssetServer) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	}()
 
 	req = req.WithContext(contextWithLogger(req.Context(), a.options.Logger))
+	if req.Header.Get(webViewRequestHeaderEmbeddedGuest) == "1" && strings.HasPrefix(req.URL.Path, "/wails/") {
+		http.Error(wrapped, "Wails runtime endpoints are unavailable to embedded WebViews", http.StatusForbidden)
+		return
+	}
 	a.handler.ServeHTTP(wrapped, req)
 
 	a.options.Logger.Debug(

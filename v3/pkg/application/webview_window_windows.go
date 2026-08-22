@@ -22,9 +22,9 @@ import (
 	"github.com/wailsapp/wails/v3/internal/sliceutil"
 	"github.com/wailsapp/wails/v3/internal/webview2/webviewloader"
 
+	"github.com/wailsapp/wails/v3/internal/webview2/pkg/edge"
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/w32"
-	"github.com/wailsapp/wails/v3/internal/webview2/pkg/edge"
 )
 
 var edgeMap = map[string]uintptr{
@@ -2590,12 +2590,9 @@ func (w *windowsWebviewWindow) setupChromium() {
 		w.parent.options.BackgroundColour.Alpha,
 	)
 
-	// WebView2's PermissionRequested handler checks the global permission
-	// before the per-kind map, so the blanket "allow all" must only be set
-	// when no per-kind policy is configured — otherwise it would override the
-	// Permissions map and a configured PermissionDeny would be ignored. When a
-	// policy is present, unset kinds fall through to PermissionDefault (the
-	// platform's native prompt).
+	// Preserve the historical blanket "allow all" only when no per-kind policy
+	// is configured. When a policy is present, unset kinds fall through to
+	// PermissionDefault (the platform's native prompt).
 	if !hasPermissionPolicy {
 		chromium.SetGlobalPermission(edge.CoreWebView2PermissionStateAllow)
 	}
@@ -2646,7 +2643,7 @@ func (w *windowsWebviewWindow) flash(enabled bool) {
 	w32.FlashWindow(w.hwnd, enabled)
 }
 
-func (w *windowsWebviewWindow) navigationStarting(_ *edge.ICoreWebView2) {
+func (w *windowsWebviewWindow) navigationStarting(_ *edge.ICoreWebView2, _ *edge.ICoreWebView2NavigationStartingEventArgs) {
 	w.setNonClientHitTestRegions(nil)
 }
 

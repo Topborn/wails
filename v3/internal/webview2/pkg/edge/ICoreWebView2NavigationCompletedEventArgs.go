@@ -4,6 +4,8 @@ package edge
 
 import (
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 type _ICoreWebView2NavigationCompletedEventArgsVtbl struct {
@@ -11,6 +13,24 @@ type _ICoreWebView2NavigationCompletedEventArgsVtbl struct {
 	GetIsSuccess      ComProc
 	GetWebErrorStatus ComProc
 	GetNavigationId   ComProc
+}
+
+func (i *ICoreWebView2NavigationCompletedEventArgs) GetIsSuccess() (bool, error) {
+	var value int32
+	hr, _, _ := i.vtbl.GetIsSuccess.Call(uintptr(unsafe.Pointer(i)), uintptr(unsafe.Pointer(&value)))
+	if windows.Handle(hr) != windows.S_OK {
+		return false, windows.Errno(hr)
+	}
+	return value != 0, nil
+}
+
+func (i *ICoreWebView2NavigationCompletedEventArgs) GetWebErrorStatus() (uint32, error) {
+	var value uint32
+	hr, _, _ := i.vtbl.GetWebErrorStatus.Call(uintptr(unsafe.Pointer(i)), uintptr(unsafe.Pointer(&value)))
+	if windows.Handle(hr) != windows.S_OK {
+		return 0, windows.Errno(hr)
+	}
+	return value, nil
 }
 
 type ICoreWebView2NavigationCompletedEventArgs struct {

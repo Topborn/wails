@@ -18,6 +18,7 @@ if (hasDOM) {
 import "./contextmenu.js";
 import "./drag.js";
 import "./appregion.js";
+import "./embedded_webview.js";
 
 // Re-export public API
 import * as Application from "./application.js";
@@ -66,6 +67,12 @@ export {
 export { Create };
 
 export * from "./cancellable.js";
+export {
+    WailsWebViewElement,
+    type EmbeddedWebViewBounds,
+    type EmbeddedWebViewLoadFailureDetail,
+    type EmbeddedWebViewRenderProcessGoneDetail,
+} from "./embedded_webview.js";
 
 // Export transport interfaces and utilities
 export {
@@ -99,7 +106,7 @@ if (hasDOM) {
 }
 
 if (hasDOM) {
-    System.invoke("wails:runtime:ready");
+    System.invoke("wails:runtime:ready:" + clientId);
 }
 
 /**

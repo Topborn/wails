@@ -323,6 +323,18 @@ func (i *ICoreWebView2) ExecuteScript(javascript string, handler *iCoreWebView2E
 	return nil
 }
 
+func (i *ICoreWebView2) AddNewWindowRequested(handler *ICoreWebView2NewWindowRequestedEventHandler, token *_EventRegistrationToken) error {
+	hr, _, _ := i.vtbl.AddNewWindowRequested.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(handler)),
+		uintptr(unsafe.Pointer(token)),
+	)
+	if windows.Handle(hr) != windows.S_OK {
+		return windows.Errno(hr)
+	}
+	return nil
+}
+
 func (i *ICoreWebView2) GetSettings() (*ICoreWebViewSettings, error) {
 
 	var settings *ICoreWebViewSettings
@@ -348,6 +360,67 @@ func (i *ICoreWebView2) GetSource() (string, error) {
 	source := windows.UTF16PtrToString(_source)
 	windows.CoTaskMemFree(unsafe.Pointer(_source))
 	return source, nil
+}
+
+func (i *ICoreWebView2) Reload() error {
+	hr, _, _ := i.vtbl.Reload.Call(uintptr(unsafe.Pointer(i)))
+	if windows.Handle(hr) != windows.S_OK {
+		return windows.Errno(hr)
+	}
+	return nil
+}
+
+func (i *ICoreWebView2) Stop() error {
+	hr, _, _ := i.vtbl.Stop.Call(uintptr(unsafe.Pointer(i)))
+	if windows.Handle(hr) != windows.S_OK {
+		return windows.Errno(hr)
+	}
+	return nil
+}
+
+func (i *ICoreWebView2) GetCanGoBack() (bool, error) {
+	var value int32
+	hr, _, _ := i.vtbl.GetCanGoBack.Call(uintptr(unsafe.Pointer(i)), uintptr(unsafe.Pointer(&value)))
+	if windows.Handle(hr) != windows.S_OK {
+		return false, windows.Errno(hr)
+	}
+	return value != 0, nil
+}
+
+func (i *ICoreWebView2) GetCanGoForward() (bool, error) {
+	var value int32
+	hr, _, _ := i.vtbl.GetCanGoForward.Call(uintptr(unsafe.Pointer(i)), uintptr(unsafe.Pointer(&value)))
+	if windows.Handle(hr) != windows.S_OK {
+		return false, windows.Errno(hr)
+	}
+	return value != 0, nil
+}
+
+func (i *ICoreWebView2) GoBack() error {
+	hr, _, _ := i.vtbl.GoBack.Call(uintptr(unsafe.Pointer(i)))
+	if windows.Handle(hr) != windows.S_OK {
+		return windows.Errno(hr)
+	}
+	return nil
+}
+
+func (i *ICoreWebView2) GoForward() error {
+	hr, _, _ := i.vtbl.GoForward.Call(uintptr(unsafe.Pointer(i)))
+	if windows.Handle(hr) != windows.S_OK {
+		return windows.Errno(hr)
+	}
+	return nil
+}
+
+func (i *ICoreWebView2) GetDocumentTitle() (string, error) {
+	var value *uint16
+	hr, _, _ := i.vtbl.GetDocumentTitle.Call(uintptr(unsafe.Pointer(i)), uintptr(unsafe.Pointer(&value)))
+	if windows.Handle(hr) != windows.S_OK {
+		return "", windows.Errno(hr)
+	}
+	result := windows.UTF16PtrToString(value)
+	windows.CoTaskMemFree(unsafe.Pointer(value))
+	return result, nil
 }
 
 func (i *ICoreWebView2) GetContainsFullScreenElement() (bool, error) {

@@ -194,6 +194,10 @@ type WebviewWindowOptions struct {
 	// per-platform meaning of the default.
 	Permissions map[PermissionType]Permission
 
+	// EmbeddedWebViews enables isolated native WebViews controlled by
+	// <wails-webview> elements in this window. Nil disables the feature.
+	EmbeddedWebViews *EmbeddedWebViewPolicy
+
 	// OpenInspectorOnStartup will open the inspector when the window is first shown.
 	OpenInspectorOnStartup bool
 
