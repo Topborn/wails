@@ -62,6 +62,7 @@ var (
 	procEnableWindow                  = moduser32.NewProc("EnableWindow")
 	procIsWindowEnabled               = moduser32.NewProc("IsWindowEnabled")
 	procIsWindowVisible               = moduser32.NewProc("IsWindowVisible")
+	procIsChild                       = moduser32.NewProc("IsChild")
 	procSetFocus                      = moduser32.NewProc("SetFocus")
 	procGetFocus                      = moduser32.NewProc("GetFocus")
 	procSetActiveWindow               = moduser32.NewProc("SetActiveWindow")
@@ -713,6 +714,11 @@ func IsWindowVisible(hwnd HWND) bool {
 	ret, _, _ := procIsWindowVisible.Call(
 		uintptr(hwnd))
 
+	return ret != 0
+}
+
+func IsChild(parent, child HWND) bool {
+	ret, _, _ := procIsChild.Call(uintptr(parent), uintptr(child))
 	return ret != 0
 }
 

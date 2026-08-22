@@ -63,6 +63,9 @@ type WebviewWindowOptions struct {
     // Permissions
     Permissions map[PermissionType]Permission
 
+    // Crash-isolated native guest webviews (nil disables the feature)
+    EmbeddedWebViews *EmbeddedWebViewPolicy
+
     // Window-control button states
     MinimiseButtonState ButtonState
     MaximiseButtonState ButtonState

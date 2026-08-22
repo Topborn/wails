@@ -37,7 +37,8 @@
     "./src/index.ts",
     "./src/appregion.ts",
     "./src/contextmenu.ts",
-    "./src/drag.ts"
+    "./src/drag.ts",
+    "./src/embedded_webview.ts"
   ],
   "scripts": {
     "check": "npx tsc --noEmit",

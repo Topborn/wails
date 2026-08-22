@@ -1,0 +1,141 @@
+---
+title: Embedded WebViews
+description: Embed crash-isolated native web content inside a Wails window
+sidebar:
+  order: 4
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+`<wails-webview>` embeds another native webview inside a `WebviewWindow`. Its API follows the useful subset of Electron's `<webview>` tag while keeping Wails' security boundary explicit.
+
+The guest is not another DOM subtree. The custom element is a layout placeholder; Wails places a native webview over its bounding box. Guest web content runs in an isolated native web-content process/context, so a guest renderer crash does not terminate the parent window or another guest.
+
+<Aside type="caution" title="Process isolation, not a separate UI thread">
+  Native view creation and positioning still happen on the application's UI thread. JavaScript and rendering run in the platform web engine's child process. A guest renderer/browser-process failure is recoverable; a crash in the Wails host process, UI toolkit, native webview library, or the operating system is outside this boundary.
+</Aside>
+
+## Enable the feature
+
+Embedded webviews are disabled unless the parent window has an `EmbeddedWebViews` policy:
+
+```go
+window := app.Window.NewWithOptions(application.WebviewWindowOptions{
+    Title:  "Embedded browser",
+    Width:  1200,
+    Height: 800,
+    EmbeddedWebViews: &application.EmbeddedWebViewPolicy{
+        // Exact origins only. Wildcards are intentionally unsupported.
+        AllowedOrigins: []string{
+            "https://docs.example.com",
+            "https://login.example.com:8443",
+        },
+
+        // Optional: allow pages from the application's asset handler.
+        AllowLocalAssets: true,
+
+        // Host-to-guest evaluation is off unless explicitly enabled.
+        AllowJavaScriptEvaluation: false,
+        DevToolsEnabled:           false,
+
+        // Unspecified guest permissions are denied.
+        Permissions: map[application.PermissionType]application.Permission{
+            application.PermissionCamera:     application.PermissionDeny,
+            application.PermissionMicrophone: application.PermissionDeny,
+        },
+
+        // This callback can further restrict the static allowlist, never widen it.
+        NavigationPolicy: func(request application.EmbeddedWebViewNavigationRequest) application.EmbeddedWebViewNavigationDecision {
+            if request.IsMainFrame {
+                return application.EmbeddedWebViewNavigationAllow
+            }
+            return application.EmbeddedWebViewNavigationDeny
+        },
+    },
+})
+```
+
+`NavigationPolicy` is synchronous and fails closed if it panics. Return promptly and avoid re-entering window APIs from the callback.
+
+## Add a guest to the page
+
+Give the element real layout dimensions:
+
+```html
+<wails-webview
+  id="documentation"
+  src="https://docs.example.com/start"
+  style="display: block; width: 100%; height: 520px"
+></wails-webview>
+```
+
+```ts
+import type { WailsWebViewElement } from "@wailsio/runtime";
+
+const guest = document.querySelector<WailsWebViewElement>("#documentation")!;
+
+await guest.loadURL("https://docs.example.com/guide");
+console.log(await guest.getTitle());
+
+guest.addEventListener("render-process-gone", async (event) => {
+    console.error("Guest renderer exited", (event as CustomEvent).detail);
+    await guest.reload(); // destroys and recreates the isolated native guest
+});
+```
+
+The native view is created after the element is connected and has non-zero visible bounds. Removing the element destroys its native guest. Moving it within the DOM preserves the guest when it is reattached in the same microtask.
+
+## Element API
+
+| Member | Purpose |
+|---|---|
+| `src`, `loadURL(url)` | Read or navigate the main-frame URL |
+| `userAgent` | User agent used when the native guest is created |
+| `webViewId` | Read-only backend ID, or `null` before creation |
+| `getURL()`, `getTitle()` | Read current navigation state |
+| `isLoading()`, `stop()` | Inspect or stop navigation |
+| `reload()`, `reloadIgnoringCache()` | Reload; `reload()` also reconstructs a crashed guest |
+| `canGoBack()`, `canGoForward()` | Inspect history state |
+| `goBack()`, `goForward()` | Navigate history |
+| `executeJavaScript(script)` | Evaluate host-supplied JavaScript when policy permits it |
+| `openDevTools()` | Open guest developer tools when policy permits it |
+| `setZoomFactor(factor)`, `getZoomFactor()` | Set or read zoom (`0 < factor <= 5`) |
+| `focus()`, `isFocused()` | Manage native guest focus |
+| `destroy()` | Permanently destroy this element's native guest |
+
+`executeJavaScript` returns JSON-compatible values. It is host-to-guest only and does not install a guest-to-host bridge.
+
+## Events
+
+Events are standard `CustomEvent`s dispatched on the owning element:
+
+- `did-attach`
+- `will-navigate`
+- `did-start-loading`, `did-stop-loading`
+- `did-navigate`, `did-finish-load`, `did-fail-load`
+- `dom-ready`, `page-title-updated`
+- `new-window-requested` (reported and denied)
+- `will-download` (reported and denied on WebView2; other engines cancel before exposing a download)
+- `child-process-gone`
+- `render-process-gone`
+- `webview-error`
+- `destroyed`
+
+The `render-process-gone` detail contains `reason` and `exitCode`. Wails does not automatically reload a crashed guest; call `reload()` when your application is ready to recover it.
+
+## Isolation and restrictions
+
+Each guest receives its own transient data/session boundary:
+
+| Platform | Isolation mechanism |
+|---|---|
+| macOS | Separate `WKWebView` content process with a non-persistent `WKWebsiteDataStore` |
+| Windows | Unique WebView2 user-data folder and environment/process group |
+| Linux GTK4 | Unique `WebKitWebContext` and ephemeral `WebKitNetworkSession` |
+| Linux GTK3 legacy | Unique `WebKitWebContext` and ephemeral `WebKitWebsiteDataManager` |
+
+This intentionally prevents sharing cookies and storage with the parent or other guests. Popups and downloads are denied. File-selection dialogs are denied on macOS and Linux; WebView2 retains its user-initiated native file picker. Guest permission requests are denied unless explicitly allowed by the embedded policy.
+
+Local guest pages can load ordinary application assets when `AllowLocalAssets` is true, but `/wails/runtime`, `/wails/runtime.js`, and `/wails/custom.js` return `403`. The Wails runtime, generated bindings, and `window.external` bridge are never installed in a guest.
+
+Because the guest is a native sibling view, CSS transforms, masks, opacity, border radius, and ancestor overflow clipping do not affect it. Rectangle position, size, visibility, and stacking order are synchronized from the placeholder element.

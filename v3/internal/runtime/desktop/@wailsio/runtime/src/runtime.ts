@@ -10,6 +10,7 @@ The electron alternative for Go
 
 import { nanoid } from "./nanoid.js";
 import { hasDOM } from "./environment.js";
+import { objectNames } from "./protocol.generated.js";
 
 // Resolved lazily: window does not exist when the module is imported during
 // server-side rendering (#4679), and nothing can call the runtime there.
@@ -45,22 +46,8 @@ export class RuntimeError extends Error {
     }
 }
 
-// Object Names
-export const objectNames = Object.freeze({
-    Call: 0,
-    Clipboard: 1,
-    Application: 2,
-    Events: 3,
-    ContextMenu: 4,
-    Dialog: 5,
-    Window: 6,
-    Screens: 7,
-    System: 8,
-    Browser: 9,
-    CancelCall: 10,
-    IOS: 11,
-    Android: 12,
-});
+// Re-export the generated protocol for custom transport implementations.
+export { objectNames };
 export let clientId = nanoid();
 
 /**

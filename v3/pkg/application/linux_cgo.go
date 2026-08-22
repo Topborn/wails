@@ -1188,7 +1188,7 @@ func (w *linuxWebviewWindow) minimise() {
 	C.gtk_window_minimize(w.gtkWindow())
 }
 
-func windowNew(application pointer, menu pointer, menuStyle LinuxMenuStyle, windowId uint, gpuPolicy WebviewGpuPolicy) (window, webview, vbox pointer) {
+func windowNew(application pointer, menu pointer, menuStyle LinuxMenuStyle, windowId uint, gpuPolicy WebviewGpuPolicy) (window, webview, vbox, embeddedContainer pointer) {
 	window = pointer(C.gtk_application_window_new((*C.GtkApplication)(application)))
 	C.g_object_ref_sink(C.gpointer(window))
 
@@ -1213,9 +1213,16 @@ func windowNew(application pointer, menu pointer, menuStyle LinuxMenuStyle, wind
 		}
 	}
 
-	C.gtk_box_append((*C.GtkBox)(vbox), (*C.GtkWidget)(webview))
-	C.gtk_widget_set_vexpand((*C.GtkWidget)(webview), C.gboolean(1))
-	C.gtk_widget_set_hexpand((*C.GtkWidget)(webview), C.gboolean(1))
+	overlay := C.gtk_overlay_new()
+	embeddedContainer = pointer(C.gtk_fixed_new())
+	C.gtk_overlay_set_child((*C.GtkOverlay)(unsafe.Pointer(overlay)), (*C.GtkWidget)(webview))
+	C.gtk_overlay_add_overlay((*C.GtkOverlay)(unsafe.Pointer(overlay)), (*C.GtkWidget)(embeddedContainer))
+	C.gtk_widget_set_can_target((*C.GtkWidget)(embeddedContainer), C.gboolean(0))
+	C.gtk_widget_set_vexpand((*C.GtkWidget)(embeddedContainer), C.gboolean(1))
+	C.gtk_widget_set_hexpand((*C.GtkWidget)(embeddedContainer), C.gboolean(1))
+	C.gtk_box_append((*C.GtkBox)(vbox), overlay)
+	C.gtk_widget_set_vexpand(overlay, C.gboolean(1))
+	C.gtk_widget_set_hexpand(overlay, C.gboolean(1))
 	return
 }
 

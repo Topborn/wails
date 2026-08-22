@@ -153,6 +153,38 @@ func TestContentSniffing(t *testing.T) {
 	}
 }
 
+func TestEmbeddedWebViewCannotLoadRuntimeEndpoints(t *testing.T) {
+	server, err := NewAssetServer(&Options{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		}),
+		Logger: slog.Default(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{"/wails/runtime", "/wails/runtime.js", "/wails/custom.js"} {
+		t.Run(path, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, path, nil)
+			request.Header.Set(webViewRequestHeaderEmbeddedGuest, "1")
+			response := httptest.NewRecorder()
+			server.ServeHTTP(response, request)
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected %d, got %d", http.StatusForbidden, response.Code)
+			}
+		})
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/guest/index.html", nil)
+	request.Header.Set(webViewRequestHeaderEmbeddedGuest, "1")
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("ordinary guest asset was blocked: status %d", response.Code)
+	}
+}
+
 func TestIndexFallback(t *testing.T) {
 	// Paths to try and whether a 404 should trigger a fallback.
 	paths := map[string]bool{

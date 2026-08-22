@@ -13,38 +13,6 @@ import (
 // TODO maybe we could use a new struct that has the targetWindow as an attribute so we could get rid of passing the targetWindow
 // as parameter through every function call.
 
-const (
-	callRequest        = 0
-	clipboardRequest   = 1
-	applicationRequest = 2
-	eventsRequest      = 3
-	contextMenuRequest = 4
-	dialogRequest      = 5
-	windowRequest      = 6
-	screensRequest     = 7
-	systemRequest      = 8
-	browserRequest     = 9
-	cancelCallRequest  = 10
-	iosRequest         = 11
-	androidRequest     = 12
-)
-
-var objectNames = map[int]string{
-	callRequest:        "Call",
-	clipboardRequest:   "Clipboard",
-	applicationRequest: "Application",
-	eventsRequest:      "Events",
-	contextMenuRequest: "ContextMenu",
-	dialogRequest:      "Dialog",
-	windowRequest:      "Window",
-	screensRequest:     "Screens",
-	systemRequest:      "System",
-	browserRequest:     "Browser",
-	cancelCallRequest:  "CancelCall",
-	iosRequest:         "iOS",
-	androidRequest:     "Android",
-}
-
 type RuntimeRequest struct {
 	// Object identifies which Wails subsystem to call (Call=0, Clipboard=1, etc.)
 	// See objectNames in runtime.ts
@@ -129,6 +97,8 @@ func (m *MessageProcessor) HandleRuntimeCallWithIDs(ctx context.Context, req *Ru
 		return m.processIOSMethod(req, targetWindow)
 	case androidRequest:
 		return m.processAndroidMethod(req, targetWindow)
+	case embeddedWebViewRequest:
+		return m.processEmbeddedWebViewMethod(req, targetWindow)
 	default:
 		return nil, errs.NewInvalidRuntimeCallErrorf("unknown object %d", req.Object)
 	}
@@ -201,6 +171,8 @@ func (m *MessageProcessor) logRuntimeCall(req *RuntimeRequest) {
 		methodName = iosMethodNames[req.Method]
 	case androidRequest:
 		methodName = androidMethodNames[req.Method]
+	case embeddedWebViewRequest:
+		methodName = embeddedWebViewMethodNames[req.Method]
 	}
 
 	m.Debug("Runtime call:", "method", objectName+"."+methodName, "args", req.Args.String())
