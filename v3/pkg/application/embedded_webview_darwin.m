@@ -32,6 +32,9 @@ static const void *WailsEmbeddedZIndexKey = &WailsEmbeddedZIndexKey;
 // through, and hitTest: declines them so clicks reach the host DOM.
 @interface WailsEmbeddedWebView : WKWebView
 @property (nonatomic, retain) NSArray<NSValue*> *exclusions;
+// Corner radius per entry of `exclusions`, so a rounded overlay leaves no
+// square host corners showing around it.
+@property (nonatomic, retain) NSArray<NSNumber*> *exclusionRadii;
 @property unsigned int windowID;
 @property unsigned int viewID;
 @end
@@ -39,6 +42,7 @@ static const void *WailsEmbeddedZIndexKey = &WailsEmbeddedZIndexKey;
 @implementation WailsEmbeddedWebView
 - (void)dealloc {
     [_exclusions release];
+    [_exclusionRadii release];
     [super dealloc];
 }
 - (BOOL)pointExcluded:(NSPoint)local {
@@ -60,29 +64,58 @@ static const void *WailsEmbeddedZIndexKey = &WailsEmbeddedZIndexKey;
         return;
     }
     self.wantsLayer = YES;
+    // The mask is rasterised: everything opaque, then each cut-out cleared.
+    // Overlapping cut-outs simply union, and abutting edges share pixels, so
+    // neither an even-odd flip nor an anti-aliased seam can leak the guest.
+    CGFloat scale = self.window.backingScaleFactor > 0 ? self.window.backingScaleFactor : 2;
     CGFloat height = self.bounds.size.height;
-    BOOL flipped = self.layer.geometryFlipped;
-    CGMutablePathRef path = CGPathCreateMutable();
-    CGPathAddRect(path, NULL, self.bounds);
-    for (NSValue *value in self.exclusions) {
-        NSRect rect = NSIntersectionRect(value.rectValue, self.bounds);
-        if (NSIsEmptyRect(rect)) continue;
-        if (!flipped) rect.origin.y = height - rect.origin.y - rect.size.height;
-        CGPathAddRect(path, NULL, rect);
+    size_t pixelWidth = (size_t)ceil(self.bounds.size.width * scale);
+    size_t pixelHeight = (size_t)ceil(height * scale);
+    if (pixelWidth == 0 || pixelHeight == 0) {
+        self.layer.mask = nil;
+        return;
     }
-    CAShapeLayer *mask = [CAShapeLayer layer];
+    CGContextRef ctx = CGBitmapContextCreate(NULL, pixelWidth, pixelHeight, 8, pixelWidth, NULL, (CGBitmapInfo)kCGImageAlphaOnly);
+    if (ctx == NULL) return;
+    CGContextScaleCTM(ctx, scale, scale);
+    CGContextSetGrayFillColor(ctx, 0, 1);
+    CGContextFillRect(ctx, self.bounds);
+    CGContextSetBlendMode(ctx, kCGBlendModeClear);
+    [self.exclusions enumerateObjectsUsingBlock:^(NSValue *value, NSUInteger index, BOOL *stop) {
+        NSRect full = value.rectValue;
+        NSRect rect = NSIntersectionRect(full, self.bounds);
+        if (NSIsEmptyRect(rect)) return;
+        CGFloat radius = index < self.exclusionRadii.count ? self.exclusionRadii[index].doubleValue : 0;
+        // A box clipped by the view edge keeps a straight cut on that edge.
+        if (!NSEqualRects(full, rect)) radius = 0;
+        radius = MIN(radius, MIN(rect.size.width, rect.size.height) / 2);
+        // Exclusions are top-left based; the bitmap is bottom-left based.
+        rect.origin.y = height - rect.origin.y - rect.size.height;
+        if (radius > 0) {
+            CGPathRef path = CGPathCreateWithRoundedRect(rect, radius, radius, NULL);
+            CGContextAddPath(ctx, path);
+            CGContextFillPath(ctx);
+            CGPathRelease(path);
+        } else {
+            CGContextFillRect(ctx, rect);
+        }
+    }];
+    CGImageRef image = CGBitmapContextCreateImage(ctx);
+    CGContextRelease(ctx);
+    CALayer *mask = [CALayer layer];
     mask.frame = self.bounds;
-    mask.fillRule = kCAFillRuleEvenOdd;
-    mask.path = path;
-    CGPathRelease(path);
+    mask.contentsScale = scale;
+    mask.contents = (id)image;
+    CGImageRelease(image);
     self.layer.mask = mask;
 }
 - (void)setFrameSize:(NSSize)size {
     [super setFrameSize:size];
     if (self.exclusions.count > 0) [self updateMask];
 }
-- (void)setExclusionRects:(NSArray<NSValue*> *)rects {
+- (void)setExclusionRects:(NSArray<NSValue*> *)rects radii:(NSArray<NSNumber*> *)radii {
     self.exclusions = rects;
+    self.exclusionRadii = radii;
     [self updateMask];
 }
 // The guest never shows WebKit's own menu: the host is told where the click
@@ -105,6 +138,27 @@ static const void *WailsEmbeddedZIndexKey = &WailsEmbeddedZIndexKey;
     }];
 }
 @end
+
+// Each guest lives in its own container sized to the host element's box, and
+// fills it. WebKit lays a docked Web Inspector out against the inspected
+// view's superview, so without this the inspector would take the whole window
+// and stretch the guest to it.
+@interface WailsEmbeddedContainer : NSView
+@end
+@implementation WailsEmbeddedContainer
+// Transparent to input: only the guest (or a docked inspector) inside it
+// takes a click, so a point the guest declines — one of its exclusion
+// rectangles — falls through to the host document, not to this view.
+- (NSView *)hitTest:(NSPoint)point {
+    NSView *hit = [super hitTest:point];
+    return hit == self ? nil : hit;
+}
+@end
+
+static NSView *embeddedContainer(WKWebView *view) {
+    NSView *container = view.superview;
+    return [container isKindOfClass:[WailsEmbeddedContainer class]] ? container : view;
+}
 
 static NSMutableArray<WKWebView*> *embeddedViews(WebviewWindow *window) {
     NSMutableArray *views = objc_getAssociatedObject(window.contentView, WailsEmbeddedViewsKey);
@@ -130,9 +184,10 @@ static void reorderEmbeddedViews(WebviewWindow *window) {
     }];
     NSView *relative = nil;
     for (WKWebView *view in views) {
-        [view removeFromSuperviewWithoutNeedingDisplay];
-        [window.contentView addSubview:view positioned:NSWindowAbove relativeTo:relative];
-        relative = view;
+        NSView *container = embeddedContainer(view);
+        [container removeFromSuperviewWithoutNeedingDisplay];
+        [window.contentView addSubview:container positioned:NSWindowAbove relativeTo:relative];
+        relative = container;
     }
 }
 
@@ -250,20 +305,33 @@ void* embeddedWebViewCreate(void* pointer, unsigned int windowID, unsigned int v
     delegate.allowCamera = allowCamera;
     delegate.allowMicrophone = allowMicrophone;
     if (allowLocalAssets) [config setURLSchemeHandler:delegate forURLScheme:@"wails"];
+    // Web Inspector is gated on the developer-extras preference; without it
+    // `_inspector show` silently does nothing.
+    if (devTools) [config.preferences setValue:@YES forKey:@"developerExtrasEnabled"];
 
-    WailsEmbeddedWebView *view = [[WailsEmbeddedWebView alloc] initWithFrame:embeddedFrame(window, x, y, width, height) configuration:config];
+    WailsEmbeddedContainer *container = [[WailsEmbeddedContainer alloc] initWithFrame:embeddedFrame(window, x, y, width, height)];
+    WailsEmbeddedWebView *view = [[WailsEmbeddedWebView alloc] initWithFrame:container.bounds configuration:config];
     [config release];
     view.windowID = windowID;
     view.viewID = viewID;
-    // Web Inspector only attaches to views flagged inspectable (macOS 13.3+).
+    // On macOS 13.3+ Web Inspector also needs the view flagged inspectable.
     if (devTools && [view respondsToSelector:@selector(setInspectable:)]) [view setInspectable:YES];
+    // A docked inspector is laid out against the attachment view's superview.
+    // WebKit otherwise picks the outermost ancestor under the window's content
+    // view — the container — so the inspector would take the whole window.
+    // Pin it to the guest so it docks inside the container.
+    if (devTools && [view respondsToSelector:@selector(_setInspectorAttachmentView:)]) {
+        [view performSelector:@selector(_setInspectorAttachmentView:) withObject:view];
+    }
     view.navigationDelegate = delegate;
     view.UIDelegate = delegate;
-    view.hidden = !visible;
+    container.hidden = !visible;
     // CSS bounds are top-relative while AppKit uses a bottom-left origin.
     // Let only the lower margin flex so a view whose CSS top is unchanged
     // remains anchored correctly when the parent content height changes.
-    view.autoresizingMask = NSViewMinYMargin;
+    container.autoresizingMask = NSViewMinYMargin;
+    view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [container addSubview:view];
     if (userAgent != NULL && userAgent[0] != '\0') view.customUserAgent = [NSString stringWithUTF8String:userAgent];
     objc_setAssociatedObject(view, WailsEmbeddedDelegateKey, delegate, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(view, WailsEmbeddedZIndexKey, @(zIndex), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -271,6 +339,8 @@ void* embeddedWebViewCreate(void* pointer, unsigned int windowID, unsigned int v
 
     [embeddedViews(window) addObject:view];
     reorderEmbeddedViews(window);
+    // Owned by the window's content view from here on.
+    [container release];
     if (url != NULL && url[0] != '\0') {
         NSString *value = [NSString stringWithUTF8String:url];
         [view loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:value]]];
@@ -286,7 +356,9 @@ void embeddedWebViewDestroy(void* pointer) {
     view.navigationDelegate = nil;
     view.UIDelegate = nil;
     if (window != nil) [embeddedViews(window) removeObject:view];
+    NSView *container = embeddedContainer(view);
     [view removeFromSuperview];
+    if (container != view) [container removeFromSuperview];
     objc_setAssociatedObject(view, WailsEmbeddedDelegateKey, nil, OBJC_ASSOCIATION_ASSIGN);
     [view release];
     if (window != nil) reorderEmbeddedViews(window);
@@ -295,19 +367,22 @@ void embeddedWebViewDestroy(void* pointer) {
 void embeddedWebViewSetBounds(void* pointer, int x, int y, int width, int height) {
     WKWebView *view = (WKWebView *)pointer;
     WebviewWindow *window = (WebviewWindow *)view.window;
-    if (view != nil && window != nil) view.frame = embeddedFrame(window, x, y, width, height);
+    if (view != nil && window != nil) embeddedContainer(view).frame = embeddedFrame(window, x, y, width, height);
 }
 void embeddedWebViewSetExclusions(void* pointer, const int* rects, int count) {
     WailsEmbeddedWebView *view = (WailsEmbeddedWebView *)pointer;
     if (view == nil || ![view isKindOfClass:[WailsEmbeddedWebView class]]) return;
     NSMutableArray<NSValue*> *values = [NSMutableArray arrayWithCapacity:count];
+    NSMutableArray<NSNumber*> *radii = [NSMutableArray arrayWithCapacity:count];
     for (int i = 0; i < count; i++) {
-        NSRect rect = NSMakeRect(rects[i*4], rects[i*4+1], rects[i*4+2], rects[i*4+3]);
-        if (rect.size.width > 0 && rect.size.height > 0) [values addObject:[NSValue valueWithRect:rect]];
+        NSRect rect = NSMakeRect(rects[i*5], rects[i*5+1], rects[i*5+2], rects[i*5+3]);
+        if (rect.size.width <= 0 || rect.size.height <= 0) continue;
+        [values addObject:[NSValue valueWithRect:rect]];
+        [radii addObject:@(rects[i*5+4])];
     }
-    [view setExclusionRects:values];
+    [view setExclusionRects:values radii:radii];
 }
-void embeddedWebViewSetVisible(void* pointer, bool visible) { ((WKWebView *)pointer).hidden = !visible; }
+void embeddedWebViewSetVisible(void* pointer, bool visible) { embeddedContainer((WKWebView *)pointer).hidden = !visible; }
 void embeddedWebViewSetZIndex(void* pointer, int zIndex) {
     WKWebView *view = (WKWebView *)pointer;
     if (view == nil) return;

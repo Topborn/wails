@@ -201,7 +201,7 @@ func (v *windowsEmbeddedWebView) setVisible(visible bool) error {
 // setExclusions is a no-op here: the host cannot yet be shown through a
 // guest on this platform, so overlays marked in the document stay hidden
 // behind it.
-func (v *windowsEmbeddedWebView) setExclusions([]Rect) error { return nil }
+func (v *windowsEmbeddedWebView) setExclusions([]ExclusionRect) error { return nil }
 func (v *windowsEmbeddedWebView) setZIndex(int) error {
 	v.parent.parent.reorderWindowsEmbeddedWebViews()
 	return nil

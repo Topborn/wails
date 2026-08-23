@@ -14,6 +14,7 @@ void embeddedWebViewDestroy(void* view);
 void embeddedWebViewSetBounds(void* view, int x, int y, int width, int height);
 void embeddedWebViewSetVisible(void* view, bool visible);
 // rects is count*4 ints: x, y, width, height per rectangle, view-local CSS px.
+// rects: count * [x, y, width, height, cornerRadius], view-local CSS px.
 void embeddedWebViewSetExclusions(void* view, const int* rects, int count);
 // Implemented in Go.
 extern void embeddedWebViewContextMenu(unsigned int windowID, unsigned int viewID, int x, int y, char* json);

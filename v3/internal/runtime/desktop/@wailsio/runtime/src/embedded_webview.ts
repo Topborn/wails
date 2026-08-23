@@ -88,7 +88,10 @@ function flushLayout(): void {
  * out of the native view, so the host document is visible and receives
  * pointer input there.
  */
-type ExclusionRect = [number, number, number, number];
+// [x, y, width, height, cornerRadius]. The radius is the overlay's own
+// border-radius, so a pill or a card is cut out as a rounded rectangle rather
+// than leaving host-document corners visible around it.
+type ExclusionRect = [number, number, number, number, number];
 
 // Elements that could stack above a guest: anything positioned or forming a
 // stacking context. Maintained incrementally from the mutation observer so a
@@ -193,33 +196,14 @@ export function paintsAbove(candidate: Element, guest: Element): boolean {
     return comparePaint(paintKey(itemA, shared), paintKey(itemB, shared)) > 0;
 }
 
-// Split overlapping rectangles into a disjoint set covering the same area, so
-// the native even-odd mask never re-fills an overlap.
-function disjoint(rects: ExclusionRect[]): ExclusionRect[] {
-    const out: ExclusionRect[] = [];
-    for (const rect of rects) {
-        let pieces: ExclusionRect[] = [rect];
-        for (const placed of out) {
-            const next: ExclusionRect[] = [];
-            for (const [x, y, w, h] of pieces) {
-                const [px, py, pw, ph] = placed;
-                const ix = Math.max(x, px), iy = Math.max(y, py);
-                const ax = Math.min(x + w, px + pw), ay = Math.min(y + h, py + ph);
-                if (ax <= ix || ay <= iy) {
-                    next.push([x, y, w, h]);
-                    continue;
-                }
-                if (iy > y) next.push([x, y, w, iy - y]);
-                if (ay < y + h) next.push([x, ay, w, y + h - ay]);
-                if (ix > x) next.push([x, iy, ix - x, ay - iy]);
-                if (ax < x + w) next.push([ax, iy, x + w - ax, ay - iy]);
-            }
-            pieces = next;
-            if (pieces.length === 0) break;
-        }
-        out.push(...pieces);
-    }
-    return out;
+// Drop boxes that lie entirely inside a square-cornered one: the native
+// cut-outs union, so such a box adds nothing.
+function dropContained(rects: ExclusionRect[]): ExclusionRect[] {
+    return rects.filter((rect, i) => !rects.some((other, j) => j !== i && other[4] === 0 &&
+        rect[0] >= other[0] && rect[1] >= other[1] &&
+        rect[0] + rect[2] <= other[0] + other[2] && rect[1] + rect[3] <= other[1] + other[3] &&
+        // Identical boxes: keep the first.
+        !(rect[0] === other[0] && rect[1] === other[1] && rect[2] === other[2] && rect[3] === other[3] && rect[4] === 0 && j > i)));
 }
 
 function overlayExclusions(guest: Element, bounds: EmbeddedWebViewBounds): ExclusionRect[] {
@@ -241,12 +225,30 @@ function overlayExclusions(guest: Element, bounds: EmbeddedWebViewBounds): Exclu
             if (right <= left || bottom <= top) continue;
             above ??= paintsAbove(candidate, guest);
             if (!above) break;
-            rects.push([left - bounds.x, top - bounds.y, right - left, bottom - top]);
+            // Only a box that is entirely inside the guest keeps its corners;
+            // one clipped by the guest edge has a straight cut there.
+            const whole = left === Math.floor(rect.left) && top === Math.floor(rect.top) &&
+                right === Math.ceil(rect.right) && bottom === Math.ceil(rect.bottom);
+            rects.push([left - bounds.x, top - bounds.y, right - left, bottom - top, whole ? cornerRadius(style, rect) : 0]);
         }
     }
-    const merged = disjoint(rects);
+    const merged = dropContained(rects);
     merged.sort((a, b) => a[1] - b[1] || a[0] - b[0] || a[2] - b[2] || a[3] - b[3]);
     return merged;
+}
+
+// The uniform corner radius an overlay paints with, in CSS px. Per-corner or
+// elliptical radii collapse to their smallest edge so the cutout never
+// exposes more of the host than the overlay covers; the cap at half the box
+// mirrors how CSS resolves an oversized radius on a pill.
+function cornerRadius(style: CSSStyleDeclaration, rect: DOMRect): number {
+    const values = [
+        style.borderTopLeftRadius, style.borderTopRightRadius,
+        style.borderBottomRightRadius, style.borderBottomLeftRadius,
+    ].flatMap(v => v.split(/\s+/)).map(v => v.endsWith("px") ? Number.parseFloat(v) : NaN);
+    if (values.some(v => !Number.isFinite(v))) return 0;
+    const radius = Math.min(...values);
+    return Math.max(0, Math.floor(Math.min(radius, rect.width / 2, rect.height / 2)));
 }
 
 function sameExclusions(left: ExclusionRect[], right: ExclusionRect[]): boolean {
