@@ -17,9 +17,31 @@ package application
 #import "webview_window_darwin_drag.h"
 
 // Private WebKit SPI behind WebviewWindowOptions.SiteIsolation.
+@interface _WKFeature : NSObject
+@property (nonatomic, readonly, copy) NSString *key;
+@end
+
 @interface WKPreferences (WailsSiteIsolation)
 - (void)_setSiteIsolationEnabled:(BOOL)enabled;
++ (NSArray<_WKFeature *> *)_features;
+- (void)_setEnabled:(BOOL)value forFeature:(_WKFeature *)feature;
 @end
+
+// wailsDisableWebKitFeature turns off one of WebKit's named runtime features.
+// Returns true when the feature was found and set.
+static bool wailsDisableWebKitFeature(WKPreferences *preferences, NSString *key) {
+	if (![[WKPreferences class] respondsToSelector:@selector(_features)] ||
+		![preferences respondsToSelector:@selector(_setEnabled:forFeature:)]) {
+		return false;
+	}
+	for (_WKFeature *feature in [WKPreferences _features]) {
+		if ([[feature key] isEqualToString:key]) {
+			[preferences _setEnabled:NO forFeature:feature];
+			return true;
+		}
+	}
+	return false;
+}
 
 struct WebviewPreferences {
     bool *TabFocusesLinks;
@@ -183,6 +205,13 @@ void* windowNew(unsigned int id, int width, int height, bool fraudulentWebsiteWa
 	if (preferences.SiteIsolation &&
 		[config.preferences respondsToSelector:@selector(_setSiteIsolationEnabled:)]) {
 		[config.preferences _setSiteIsolationEnabled:YES];
+		// Web Locks goes with it. WebKit's UI process validates the origin on
+		// every WebLockRegistryProxy message with a release assert, and the
+		// extra processes isolation creates are exactly the ones whose origin
+		// it fails to recognise — a trap on the app's main thread, not a
+		// recoverable error. Turning the API off means the web process never
+		// sends those messages. See WebviewWindowOptions.SiteIsolation.
+		wailsDisableWebKitFeature(config.preferences, @"WebLocksAPIEnabled");
 	}
 	config.suppressesIncrementalRendering = true;
 	if (applicationNameForUserAgent != NULL && applicationNameForUserAgent[0] != '\0') {
