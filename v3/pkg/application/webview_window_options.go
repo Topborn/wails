@@ -201,6 +201,16 @@ type WebviewWindowOptions struct {
 	// OpenInspectorOnStartup will open the inspector when the window is first shown.
 	OpenInspectorOnStartup bool
 
+	// SiteIsolation runs cross-origin iframes in this window in their own
+	// web-content process, so a hung or crashed frame does not take the
+	// window's page with it. Frames stay ordinary DOM: the page's own content
+	// stacks over them by CSS as usual. Isolation follows origin — a frame on
+	// the window's own origin (or a srcdoc frame) shares the page's process.
+	// macOS only (WebKit's site isolation, set before the view is created);
+	// WebView2 already isolates cross-site frames and WebKitGTK offers no
+	// control, so it is a no-op elsewhere.
+	SiteIsolation bool
+
 	// Mac options
 	Mac MacWindow
 

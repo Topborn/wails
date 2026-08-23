@@ -16,6 +16,11 @@ package application
 #import <AppKit/AppKit.h>
 #import "webview_window_darwin_drag.h"
 
+// Private WebKit SPI behind WebviewWindowOptions.SiteIsolation.
+@interface WKPreferences (WailsSiteIsolation)
+- (void)_setSiteIsolationEnabled:(BOOL)enabled;
+@end
+
 struct WebviewPreferences {
     bool *TabFocusesLinks;
     bool *TextInteractionEnabled;
@@ -26,6 +31,7 @@ struct WebviewPreferences {
     bool *JavaScriptCanOpenWindowsAutomatically;
     double *MinimumFontSize;
     bool *EnableAutoplayWithoutUserAction;
+    bool SiteIsolation;
 };
 
 struct PanelPreferences {
@@ -170,6 +176,13 @@ void* windowNew(unsigned int id, int width, int height, bool fraudulentWebsiteWa
 	}
 	if (preferences.MinimumFontSize != NULL) {
 		config.preferences.minimumFontSize = *preferences.MinimumFontSize;
+	}
+	// Private WebKit preference; the same machinery Safari uses. It has to be
+	// on before the view exists, which is why it lives here and not in a
+	// post-creation setter.
+	if (preferences.SiteIsolation &&
+		[config.preferences respondsToSelector:@selector(_setSiteIsolationEnabled:)]) {
+		[config.preferences _setSiteIsolationEnabled:YES];
 	}
 	config.suppressesIncrementalRendering = true;
 	if (applicationNameForUserAgent != NULL && applicationNameForUserAgent[0] != '\0') {
@@ -1602,6 +1615,7 @@ func (w *macosWebviewWindow) getWebviewPreferences() C.struct_WebviewPreferences
 		v := C.double(wvprefs.MinimumFontSize.Get())
 		result.MinimumFontSize = &v
 	}
+	result.SiteIsolation = C.bool(w.parent.options.SiteIsolation)
 	if wvprefs.EnableAutoplayWithoutUserAction.IsSet() {
 		result.EnableAutoplayWithoutUserAction = bool2CboolPtr(wvprefs.EnableAutoplayWithoutUserAction.Get())
 	}

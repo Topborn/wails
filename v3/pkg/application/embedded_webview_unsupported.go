@@ -17,7 +17,7 @@ func (*unsupportedEmbeddedWebView) destroy() error             { return nil }
 func (*unsupportedEmbeddedWebView) setBounds(Rect) error       { return nil }
 func (*unsupportedEmbeddedWebView) setVisible(bool) error      { return nil }
 func (*unsupportedEmbeddedWebView) setZIndex(int) error        { return nil }
-func (*unsupportedEmbeddedWebView) setExclusions([]Rect) error { return nil }
+func (*unsupportedEmbeddedWebView) setExclusions([]ExclusionRect) error { return nil }
 func (*unsupportedEmbeddedWebView) loadURL(string) error {
 	return errors.New("embedded WebViews are unavailable on this platform")
 }

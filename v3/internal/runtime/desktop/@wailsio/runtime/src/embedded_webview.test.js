@@ -55,7 +55,7 @@ describe("wails-webview", () => {
 
         expect(call).toHaveBeenCalledWith(objectNames.EmbeddedWebView, methods.SetExclusions, "", {
             id: 42,
-            rects: [[0, 76, 88, 104]],
+            rects: [[0, 76, 88, 104, 0]],
         });
 
         // Unchanged stacking is not resent; a guest with a higher z-index wins.
@@ -69,7 +69,7 @@ describe("wails-webview", () => {
         panel.remove();
     });
 
-    it("merges overlapping overlays into disjoint cut-outs", async () => {
+    it("drops an overlay box that lies inside a square one", async () => {
         await element.getURL();
         call.mockClear();
         const aside = document.createElement("aside");
@@ -84,12 +84,33 @@ describe("wails-webview", () => {
         scanStacking(aside);
         scanStacking(pill);
         await element.syncLayout(0);
-        // The pill lies inside the aside's box, so the aside's rect alone covers it.
+        // The pill lies inside the aside's box, so the aside's rect alone covers it;
+        // native cut-outs union, so nothing needs splitting.
         expect(call).toHaveBeenCalledWith(objectNames.EmbeddedWebView, methods.SetExclusions, "", {
             id: 42,
-            rects: [[188, 0, 132, 180]],
+            rects: [[188, 0, 132, 180, 0]],
         });
         aside.remove();
+        pill.remove();
+    });
+
+    it("cuts a rounded overlay out with its own corner radius", async () => {
+        await element.getURL();
+        call.mockClear();
+        const pill = document.createElement("button");
+        pill.style.position = "fixed";
+        pill.style.zIndex = "60";
+        pill.style.borderRadius = "9999px";
+        // Fully inside the guest box (12,24 → 332,204), 80×40.
+        pill.getClientRects = () => [{ left: 200, top: 100, right: 280, bottom: 140, width: 80, height: 40 }];
+        document.body.append(pill);
+        scanStacking(pill);
+        await element.syncLayout(0);
+        // An oversized radius caps at half the shorter edge, as CSS renders it.
+        expect(call).toHaveBeenCalledWith(objectNames.EmbeddedWebView, methods.SetExclusions, "", {
+            id: 42,
+            rects: [[188, 76, 80, 40, 20]],
+        });
         pill.remove();
     });
 

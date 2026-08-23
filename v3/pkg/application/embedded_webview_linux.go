@@ -66,7 +66,7 @@ func (v *linuxEmbeddedWebView) setVisible(visible bool) error {
 // setExclusions is a no-op here: the host cannot yet be shown through a
 // guest on this platform, so overlays marked in the document stay hidden
 // behind it.
-func (v *linuxEmbeddedWebView) setExclusions([]Rect) error { return nil }
+func (v *linuxEmbeddedWebView) setExclusions([]ExclusionRect) error { return nil }
 func (v *linuxEmbeddedWebView) setZIndex(int) error {
 	v.parent.parent.reorderLinuxEmbeddedWebViews()
 	return nil

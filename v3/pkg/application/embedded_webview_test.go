@@ -155,7 +155,7 @@ func (f *fakeEmbeddedWebViewImpl) destroy() error            { f.destroyed++; re
 func (*fakeEmbeddedWebViewImpl) setBounds(Rect) error        { return nil }
 func (*fakeEmbeddedWebViewImpl) setVisible(bool) error       { return nil }
 func (*fakeEmbeddedWebViewImpl) setZIndex(int) error         { return nil }
-func (*fakeEmbeddedWebViewImpl) setExclusions([]Rect) error  { return nil }
+func (*fakeEmbeddedWebViewImpl) setExclusions([]ExclusionRect) error  { return nil }
 func (*fakeEmbeddedWebViewImpl) loadURL(string) error        { return nil }
 func (*fakeEmbeddedWebViewImpl) url() (string, error)        { return "about:blank", nil }
 func (*fakeEmbeddedWebViewImpl) title() (string, error)      { return "", nil }

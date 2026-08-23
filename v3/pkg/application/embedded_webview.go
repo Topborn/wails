@@ -71,6 +71,14 @@ type embeddedWebViewOptions struct {
 	UserAgent string
 }
 
+// ExclusionRect is a guest-local box the host document paints over an
+// embedded WebView, cut out of the native view so the host shows through.
+// Radius is the box's uniform corner radius in CSS px; 0 is a plain rectangle.
+type ExclusionRect struct {
+	Rect
+	Radius int
+}
+
 type embeddedWebViewImpl interface {
 	create() error
 	destroy() error
@@ -80,7 +88,7 @@ type embeddedWebViewImpl interface {
 	// setExclusions cuts the given guest-local rectangles out of the native
 	// view so host content marked as an overlay shows through and receives
 	// input there. Platforms without masking accept and ignore the call.
-	setExclusions([]Rect) error
+	setExclusions([]ExclusionRect) error
 	loadURL(string) error
 	url() (string, error)
 	title() (string, error)

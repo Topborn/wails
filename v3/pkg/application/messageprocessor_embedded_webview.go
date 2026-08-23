@@ -86,19 +86,26 @@ func (m *MessageProcessor) callEmbeddedWebView(view *embeddedWebView, method int
 		view.mu.Unlock()
 		return unit, InvokeSyncWithError(func() error { return impl.setBounds(bounds) })
 	case embeddedWebViewSetExclusions:
-		// rects: [[x, y, width, height], ...] in guest-local CSS px.
+		// rects: [[x, y, width, height, radius?], ...] in guest-local CSS px.
 		var payload struct {
-			Rects [][4]int `json:"rects"`
+			Rects [][]int `json:"rects"`
 		}
 		if err := raw.ToStruct(&payload); err != nil {
-			return nil, errs.NewInvalidRuntimeCallErrorf("rects must be an array of [x, y, width, height]: %v", err)
+			return nil, errs.NewInvalidRuntimeCallErrorf("rects must be an array of [x, y, width, height, radius]: %v", err)
 		}
-		rects := make([]Rect, 0, len(payload.Rects))
+		rects := make([]ExclusionRect, 0, len(payload.Rects))
 		for _, r := range payload.Rects {
+			if len(r) < 4 || len(r) > 5 {
+				return nil, errs.NewInvalidRuntimeCallErrorf("rects must be an array of [x, y, width, height, radius]")
+			}
 			if r[2] <= 0 || r[3] <= 0 {
 				continue
 			}
-			rects = append(rects, Rect{X: r[0], Y: r[1], Width: r[2], Height: r[3]})
+			rect := ExclusionRect{Rect: Rect{X: r[0], Y: r[1], Width: r[2], Height: r[3]}}
+			if len(r) == 5 {
+				rect.Radius = max(0, min(r[4], r[2]/2, r[3]/2))
+			}
+			rects = append(rects, rect)
 		}
 		return unit, InvokeSyncWithError(func() error { return impl.setExclusions(rects) })
 	case embeddedWebViewSetVisible:
