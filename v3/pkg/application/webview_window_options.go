@@ -209,6 +209,28 @@ type WebviewWindowOptions struct {
 	// macOS only (WebKit's site isolation, set before the view is created);
 	// WebView2 already isolates cross-site frames and WebKitGTK offers no
 	// control, so it is a no-op elsewhere.
+	//
+	// Enabling it also turns off the Web Locks API (navigator.locks) in this
+	// window. WebKit's UI process validates the origin on every Web Locks IPC
+	// with a release assert, and the extra processes isolation creates are
+	// exactly the ones whose origin it fails to recognise — an about:blank or
+	// srcdoc frame reports the origin it inherited, while the UI process
+	// derived an opaque one from the URL, so the two never match:
+	//
+	//	WebLockRegistryProxy.cpp: Invalid message dispatched
+	//	  WebKit::WebLockRegistryProxy::requestLock(...)   (or ClientIsGoingAway)
+	//	SIGTRAP: trace trap — signal arrived during cgo execution
+	//
+	// The trap fires on the UI process's main thread inside the AppKit run
+	// loop, so it kills the whole app rather than the frame isolation was
+	// meant to contain, and nothing on this side of the IPC boundary can
+	// catch it. Web Locks is gated behind WebKit's own WebLocksAPIEnabled
+	// feature flag, so switching that off means the web process never sends
+	// those messages. See WebKit bug 315738 for the origin-inheritance half
+	// of this and 322329 for the worker half.
+	//
+	// A window that genuinely needs navigator.locks cannot have isolation on
+	// this WebKit; retest per macOS release.
 	SiteIsolation bool
 
 	// Mac options
